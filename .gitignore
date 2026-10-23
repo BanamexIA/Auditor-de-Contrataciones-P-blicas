@@ -1,0 +1,20 @@
+.env
+.env.*
+!.env.example
+
+# Source data and generated datasets
+data/raw/
+data/processed/
+data/interim/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Generated benchmark and quality outputs
+eval/results/*
+!eval/results/.gitkeep
+docs/reporte_calidad.md
+
