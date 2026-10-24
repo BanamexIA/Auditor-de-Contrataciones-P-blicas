@@ -7,6 +7,9 @@ descargados desde sus portales públicos:
   (https://datos.gob.mx/).
 - `Listado_completo_69-B.csv`: listado de contribuyentes del artículo 69-B
   publicado por el SAT (https://www.sat.gob.mx/).
+- `compranet_historico.csv`: contratos y expedientes de compras y contrataciones públicas desde el año 2010 hasta 2022.
+(https://www.datos.gob.mx/dataset/contratos_expedientes_sistema_historico_compranet)
+
 
 Confirma en los portales las URL de descarga, fecha de actualización, licencia,
 columnas y codificación del archivo que utilices; pueden cambiar entre

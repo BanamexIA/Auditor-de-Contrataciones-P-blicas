@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import codecs
 import csv
 import io
 import os
@@ -16,6 +17,10 @@ try:
     import psycopg
 except ImportError:  # pragma: no cover - handled at runtime
     psycopg = None
+
+from db_config import load_database_environment
+
+load_database_environment()
 
 
 EXPECTED_HEADERS = {
@@ -56,11 +61,17 @@ def sanitize_sql_identifier(value: str) -> str:
 
 
 def detect_best_encoding(path: Path) -> str:
-    data = path.read_bytes()
     encodings = ["utf-8-sig", "utf-8", "cp1252", "latin-1", "iso-8859-1"]
     for encoding in encodings:
+        decoder = codecs.getincrementaldecoder(encoding)(errors="strict")
         try:
-            data.decode(encoding)
+            with path.open("rb") as handle:
+                while True:
+                    chunk = handle.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    decoder.decode(chunk)
+                decoder.decode(b"", final=True)
             return encoding
         except (UnicodeDecodeError, ValueError):
             continue
@@ -85,19 +96,20 @@ def detect_delimiter(path: Path, encoding: str) -> str:
         "moneda",
     }
 
+    with path.open("rb") as handle:
+        sample = handle.read(256 * 1024).decode(encoding)
     for delimiter in delimiters:
         score = 0
-        with path.open("r", encoding=encoding, newline="") as handle:
-            for row in csv.reader(handle, delimiter=delimiter):
-                if not row or all(not cell.strip() for cell in row):
-                    continue
-                normalized = [normalize_identifier(cell) for cell in row]
-                matches = sum(1 for token in header_tokens if token in normalized)
-                if matches:
-                    score += matches * 10
-                    if "rfc" in normalized or "codigo_contrato" in normalized:
-                        score += 20
-                    break
+        for row in csv.reader(io.StringIO(sample), delimiter=delimiter):
+            if not row or all(not cell.strip() for cell in row):
+                continue
+            normalized = [normalize_identifier(cell) for cell in row]
+            matches = sum(1 for token in header_tokens if token in normalized)
+            if matches:
+                score += matches * 10
+                if "rfc" in normalized or "codigo_contrato" in normalized:
+                    score += 20
+                break
         if score > best_score:
             best_score = score
             best_delimiter = delimiter
@@ -124,21 +136,19 @@ def find_header_row(rows: Iterable[list[str]], table_key: str) -> tuple[int, lis
     return 0, next(iter(rows)) if False else []
 
 
-def parse_header(header: list[str], table_key: str) -> list[str]:
+def parse_header(header: list[str]) -> list[str]:
     columns: list[str] = []
     seen: set[str] = set()
     for index, cell in enumerate(header):
-        candidate = normalize_identifier(cell)
-        if not candidate:
-            candidate = f"col_{index + 1}"
-        if candidate in seen:
-            candidate = f"{candidate}_{index + 1}"
+        base = normalize_identifier(cell) or f"col_{index + 1}"
+        candidate = base[:63]
+        suffix_index = 1
+        while candidate in seen:
+            suffix = f"_{suffix_index}"
+            candidate = f"{base[:63 - len(suffix)]}{suffix}"
+            suffix_index += 1
         columns.append(candidate)
         seen.add(candidate)
-    if table_key == "contratos_comprasmx":
-        for known in EXPECTED_HEADERS[table_key]:
-            if known not in columns:
-                columns.append(known)
     return columns
 
 
@@ -163,13 +173,14 @@ def get_db_connection() -> object:
     port = os.getenv("DB_PORT") or os.getenv("DB_PORT_HOST") or "5432"
     dbname = os.getenv("DB_NAME") or os.getenv("POSTGRES_DB") or "postgres"
     conninfo = f"dbname={dbname} user={user} password={password} host={host} port={port}"
-    return psycopg.connect(conninfo)
+    conninfo = psycopg.conninfo.make_conninfo(dbname=dbname, user=user, host=host, port=port)
+    return psycopg.connect(conninfo, password=password)
 
 
 def build_create_table_sql(table_name: str, columns: list[str]) -> str:
     column_sql = ",\n  ".join(f"{sanitize_sql_identifier(col)} TEXT" for col in columns)
     sql = (
-        f"CREATE TABLE IF NOT EXISTS raw.{table_name} (\n"
+        f"CREATE TABLE IF NOT EXISTS raw.{sanitize_sql_identifier(table_name)} (\n"
         f"  {column_sql},\n"
         "  _source_file TEXT,\n"
         "  _loaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n"
@@ -179,92 +190,55 @@ def build_create_table_sql(table_name: str, columns: list[str]) -> str:
     return sql
 
 
-def detect_csv_structure(path: Path, table_key: str) -> tuple[str, str, list[str], list[list[str]], int]:
+def ensure_raw_table(cursor, table_name: str, columns: list[str]) -> None:
+    table = f"raw.{sanitize_sql_identifier(table_name)}"
+    cursor.execute(build_create_table_sql(table_name, columns))
+    required_columns = [*columns, "_source_file", "_loaded_at", "_row_number"]
+    for column in required_columns:
+        column_type = {
+            "_loaded_at": "TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+            "_row_number": "BIGINT",
+        }.get(column, "TEXT")
+        cursor.execute(
+            f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS "
+            f"{sanitize_sql_identifier(column)} {column_type}"
+        )
+
+
+def detect_csv_structure(path: Path, table_key: str) -> tuple[str, str, int, list[str]]:
     encoding = detect_best_encoding(path)
     delimiter = detect_delimiter(path, encoding)
-    rows = list(iter_csv_rows(path, encoding, delimiter))
-    if not rows:
-        raise ValueError(f"No rows found in {path}")
-    header_index, header = find_header_row(rows, table_key)
-    data_rows = rows[max(0, header_index + 1):]
-    return encoding, delimiter, parse_header(header, table_key), data_rows, len(data_rows)
-
-
-def copy_rows_to_db(table_name: str, columns: list[str], rows: list[list[str]], source_file: str) -> int:
-    conn = get_db_connection()
-    columns_sql = ", ".join(sanitize_sql_identifier(col) for col in columns)
-    copy_target = f"raw.{table_name} ({columns_sql}, _source_file, _row_number)"
-    buffer = io.StringIO()
-    writer = csv.writer(buffer, lineterminator="\n")
-    for row_number, row in enumerate(rows, start=1):
-        values = [cell.strip() if isinstance(cell, str) else cell for cell in row]
-        if len(values) < len(columns):
-            values = values + [""] * (len(columns) - len(values))
-        if len(values) > len(columns):
-            values = values[:len(columns)]
-        writer.writerow(values + [source_file, row_number])
-    buffer.seek(0)
-    with conn.cursor() as cursor:
-        cursor.execute(f"TRUNCATE TABLE raw.{table_name};")
-        cursor.copy_expert(
-            f"COPY {copy_target} FROM STDIN WITH CSV",
-            buffer,
-        )
-    conn.commit()
-    conn.close()
-    return len(rows)
+    with path.open("r", encoding=encoding, newline="") as handle:
+        for index, row in enumerate(csv.reader(handle, delimiter=delimiter)):
+            if not row or all(not cell.strip() for cell in row):
+                continue
+            normalized = [normalize_identifier(cell) for cell in row]
+            known = EXPECTED_HEADERS.get(table_key, set())
+            if any(token in normalized for token in known):
+                return encoding, delimiter, index, parse_header(row)
+            if any(token in normalized for token in ("codigo_contrato", "codigo_del_contrato", "rfc", "situacion_del_contribuyente")):
+                return encoding, delimiter, index, parse_header(row)
+    raise ValueError(f"Could not identify a supported header row in {path.name}")
 
 
 def detect_and_prepare_file(path: Path) -> dict:
-    table_key = "contratos_comprasmx" if "contratos" in path.name.lower() else "listado_69b"
-    encoding = detect_best_encoding(path)
-    delimiter = detect_delimiter(path, encoding)
-    rows = list(iter_csv_rows(path, encoding, delimiter))
-    if not rows:
-        raise ValueError(f"No readable rows found in {path}")
-
-    header_index = -1
-    header = []
-    for index, row in enumerate(rows):
-        norm_row = [normalize_identifier(cell) for cell in row]
-        known_values = [
-            "codigo_contrato",
-            "codigo_expediente",
-            "proveedor",
-            "titulo_contrato",
-            "descripcion_contrato",
-            "contract_type",
-            "tipo_contratacion",
-            "tipo_expediente",
-            "importe",
-            "moneda",
-            "fecha_inicio",
-            "fecha_fin",
-            "rfc",
-            "razon_social",
-            "nombre",
-            "nombre_del_contribuyente",
-            "situacion_del_contribuyente",
-            "no",
-        ]
-        if any(value in norm_row for value in known_values):
-            header = row
-            header_index = index
-            break
-    if header_index < 0:
-        header = rows[0]
-        header_index = 0
-    columns = parse_header(header, table_key)
-    data_rows = rows[header_index + 1:]
+    table_key = "listado_69b" if "69" in path.name.lower() or "listado" in path.name.lower() else "contratos_comprasmx"
+    encoding, delimiter, header_index, columns = detect_csv_structure(path, table_key)
     return {
         "table_key": table_key,
         "encoding": encoding,
         "delimiter": delimiter,
         "columns": columns,
-        "rows": data_rows,
         "header_index": header_index,
-        "total_rows": len(data_rows),
     }
+
+
+def iter_data_rows(path: Path, encoding: str, delimiter: str, header_index: int) -> Iterable[list[str]]:
+    with path.open("r", encoding=encoding, newline="") as handle:
+        for index, row in enumerate(csv.reader(handle, delimiter=delimiter)):
+            if index <= header_index or not row or all(not cell.strip() for cell in row):
+                continue
+            yield row
 
 
 def main() -> int:
@@ -285,46 +259,63 @@ def main() -> int:
         raise SystemExit(f"No CSV/TXT files found in {input_dir}")
 
     for path in files:
-        table_key = "contratos_comprasmx" if "contratos" in path.name.lower() else "listado_69b"
         preview = detect_and_prepare_file(path)
+        table_name = get_table_name(path.name)
         print(f"FILE: {path.name}")
-        print(f"  table: raw.{get_table_name(path.name)}")
+        print(f"  table: raw.{table_name}")
         print(f"  encoding: {preview['encoding']}")
         print(f"  delimiter: {preview['delimiter']!r}")
         print(f"  columns: {len(preview['columns'])}")
-        print(f"  data rows: {preview['total_rows']}")
         if args.dry_run:
+            count = sum(
+                1
+                for _ in iter_data_rows(
+                    path,
+                    preview["encoding"],
+                    preview["delimiter"],
+                    preview["header_index"],
+                )
+            )
+            print(f"  data rows: {count}")
             print("  DRY RUN: no database write performed")
             continue
 
-        table_name = get_table_name(path.name)
         if psycopg is None:
             raise SystemExit("psycopg is required to load data. Install project dependencies first.")
 
         try:
             start = time.perf_counter()
-            conn = get_db_connection()
-            with conn.cursor() as cursor:
-                cursor.execute(build_create_table_sql(table_name, preview["columns"]))
-                cursor.execute(f"TRUNCATE TABLE raw.{table_name};")
-                buffer = io.StringIO()
-                writer = csv.writer(buffer, lineterminator="\n")
-                for row_number, row in enumerate(preview["rows"], start=1):
-                    values = [cell.strip() if isinstance(cell, str) else cell for cell in row]
-                    if len(values) < len(preview["columns"]):
-                        values = values + [""] * (len(preview["columns"]) - len(values))
-                    if len(values) > len(preview["columns"]):
-                        values = values[:len(preview["columns"])]
-                    writer.writerow(values + [path.name, row_number])
-                buffer.seek(0)
-                cursor.copy_expert(
-                    f"COPY raw.{table_name} ({', '.join(sanitize_sql_identifier(col) for col in preview['columns'])}, _source_file, _row_number) FROM STDIN WITH CSV",
-                    buffer,
-                )
-            conn.commit()
-            conn.close()
+            loaded_rows = 0
+            with get_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    ensure_raw_table(cursor, table_name, preview["columns"])
+                    cursor.execute(f"TRUNCATE TABLE raw.{sanitize_sql_identifier(table_name)};")
+                    columns_sql = ", ".join(sanitize_sql_identifier(col) for col in preview["columns"])
+                    copy_target = (
+                        f"COPY raw.{sanitize_sql_identifier(table_name)} "
+                        f"({columns_sql}, _source_file, _row_number) FROM STDIN"
+                    )
+                    with cursor.copy(copy_target) as copy:
+                        for row_number, row in enumerate(
+                            iter_data_rows(
+                                path,
+                                preview["encoding"],
+                                preview["delimiter"],
+                                preview["header_index"],
+                            ),
+                            start=1,
+                        ):
+                            values = [cell.strip() for cell in row]
+                            if len(values) < len(preview["columns"]):
+                                values.extend([""] * (len(preview["columns"]) - len(values)))
+                            if len(values) > len(preview["columns"]):
+                                values = values[: len(preview["columns"])]
+                            copy.write_row((*values, path.name, row_number))
+                            loaded_rows = row_number
+                            if row_number % 100000 == 0:
+                                print(f"  loaded rows: {row_number:,}")
             elapsed = time.perf_counter() - start
-            print(f"  loaded rows: {preview['total_rows']}")
+            print(f"  loaded rows: {loaded_rows:,}")
             print(f"  elapsed: {elapsed:.2f}s")
         except Exception as exc:  # pragma: no cover - runtime only
             raise SystemExit(f"Database load failed for {path.name}: {exc}")

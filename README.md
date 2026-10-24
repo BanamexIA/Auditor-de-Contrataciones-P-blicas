@@ -74,6 +74,38 @@ La configuración de GPU NVIDIA está comentada en `docker-compose.yml` y
 requiere instalar NVIDIA Container Toolkit. Sin ella, Ollama puede funcionar
 en CPU, aunque la inferencia será más lenta.
 
+## Etapas de ETL
+
+Carga las fuentes raw y luego ejecuta las transformaciones:
+
+```powershell
+python etl\load_raw.py --dry-run
+python etl\load_raw.py
+python etl/build_staging.py --dry-run
+python etl/build_staging.py
+python etl/build_clean.py --dry-run
+python etl/build_clean.py
+```
+
+El modo `--dry-run` del loader detecta estructura y cuenta filas, sin escribir.
+La carga usa COPY en streaming para no materializar los CSV completos en
+memoria. El staging integra ambas fuentes de contratos (`compranet_historico` y
+ComprasMX 2026) con sus esquemas de origen y registra conversiones inválidas en
+`staging.rechazados`. El último paso materializa `clean` y prepara un cruce de
+proveedores con el listado 69-B usando RFC exacto o nombre normalizado exacto,
+sin fuzzy matching. Los scripts leen automáticamente las variables de conexión
+desde `.env` al ejecutarse desde el repositorio; en la terminal solo asegúrate
+de que el contenedor `db` esté iniciado (`docker compose up -d db`).
+Los nombres de columnas raw se normalizan a identificadores de PostgreSQL de
+hasta 63 caracteres y se desambiguan cuando se repiten o colisionan al truncarse.
+Al recargar un CSV, el loader agrega a la tabla raw cualquier columna que falte
+en una tabla creada por una versión anterior del esquema, antes de truncar y
+recargar los datos.
+
+Consulta el [diccionario de datos de la capa clean](docs/diccionario_datos.md)
+para los tipos, significados, linaje, transformaciones, riesgos de calidad y
+consideraciones de privacidad de sus columnas.
+
 ## Datos públicos
 
 Consulta [data/README.md](data/README.md) para las fuentes y la ubicación de los
