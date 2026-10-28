@@ -18,6 +18,7 @@ SELECT format('ALTER ROLE %I WITH LOGIN PASSWORD %L', :'agent_user', :'agent_pas
 \gexec
 
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+CREATE EXTENSION IF NOT EXISTS unaccent;
 CREATE SCHEMA IF NOT EXISTS raw;
 CREATE SCHEMA IF NOT EXISTS staging;
 CREATE SCHEMA IF NOT EXISTS clean;
@@ -26,9 +27,9 @@ CREATE SCHEMA IF NOT EXISTS telemetry;
 CREATE SCHEMA IF NOT EXISTS audit;
 REVOKE ALL ON SCHEMA raw, staging, clean, rag, telemetry, audit FROM PUBLIC;
 
-GRANT USAGE, CREATE ON SCHEMA raw, staging, clean TO :"etl_user";
+GRANT USAGE, CREATE ON SCHEMA raw, staging, clean, rag TO :"etl_user";
 GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
-  ON ALL TABLES IN SCHEMA raw, staging, clean TO :"etl_user";
+  ON ALL TABLES IN SCHEMA raw, staging, clean, rag TO :"etl_user";
 GRANT USAGE ON SCHEMA clean, rag TO :"agent_user";
 GRANT SELECT ON ALL TABLES IN SCHEMA clean, rag TO :"agent_user";
 

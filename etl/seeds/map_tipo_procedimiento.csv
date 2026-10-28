@@ -1,0 +1,14 @@
+fuente,prefijo,tipo_normalizado,prioridad,estado
+comprasmx,ADJUDICACION DIRECTA,adjudicacion_directa,10,pendiente
+comprasmx,INVITACION A CUANDO MENOS 3,invitacion_tres_personas,20,pendiente
+comprasmx,LICITACION PUBLICA,licitacion_publica,30,pendiente
+comprasmx,PROCEDIMIENTO DE ASIGNACION DERIVADO DE UN ACUERDO MARCO,otro,40,pendiente
+comprasmx,ENTRE ENTES PUBLICOS,otro,50,pendiente
+historico,ADJUDICACION DIRECTA,adjudicacion_directa,10,pendiente
+historico,INVITACION A CUANDO MENOS TRES,invitacion_tres_personas,20,pendiente
+historico,LICITACION PUBLICA,licitacion_publica,30,pendiente
+historico,PROYECTO DE CONVOCATORIA,otro,40,pendiente
+historico,PROYECTO DE ASOCIACION PUBLICO PRIVADA,otro,40,pendiente
+historico,CONTRATOS ENTRE ENTES PUBLICOS,otro,40,pendiente
+historico,VENTA BIENES NO UTILES,otro,40,pendiente
+historico,REPORTE DE OTRAS CONTRATACIONES,otro,40,pendiente

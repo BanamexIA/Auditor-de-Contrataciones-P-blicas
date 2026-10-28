@@ -1,5 +1,3 @@
-CREATE SCHEMA IF NOT EXISTS clean;
-
 CREATE TABLE IF NOT EXISTS clean.proveedores (
     proveedor TEXT,
     proveedor_normalizado TEXT,
@@ -23,6 +21,27 @@ CREATE TABLE IF NOT EXISTS clean.contratos (
     moneda TEXT,
     fecha_inicio DATE,
     fecha_fin DATE,
+    fuente TEXT,
+    tipo_procedimiento TEXT,
+    tipo_procedimiento_norm TEXT,
+    tipo_procedimiento_estado TEXT,
+    ley TEXT,
+    institucion TEXT,
+    clave_institucion TEXT,
+    siglas_de_la_institucion TEXT,
+    tipo_de_institucion TEXT,
+    clave_ramo TEXT,
+    descripcion_ramo TEXT,
+    clave_de_la_uc TEXT,
+    nombre_de_la_uc TEXT,
+    numero_de_procedimiento TEXT,
+    caracter_del_procedimiento TEXT,
+    articulo_de_excepcion TEXT,
+    descripcion_excepcion TEXT,
+    fecha_inicio_estado TEXT,
+    fecha_inicio_valida BOOLEAN NOT NULL DEFAULT false,
+    fecha_inicio_futura BOOLEAN NOT NULL DEFAULT false,
+    fecha_fin_antes_inicio BOOLEAN NOT NULL DEFAULT false,
     _source_file TEXT,
     _loaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

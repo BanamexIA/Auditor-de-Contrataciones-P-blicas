@@ -8,6 +8,7 @@ import re
 import unicodedata
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 
 try:
     import psycopg
@@ -24,6 +25,11 @@ def normalize_text(value: object) -> str:
         return ""
     text = unicodedata.normalize("NFKC", str(value)).strip()
     return re.sub(r"\s+", " ", text)
+
+
+def optional_text(value: object) -> str | None:
+    text = normalize_text(value)
+    return text or None
 
 
 def normalize_provider(value: object) -> str:
@@ -76,6 +82,14 @@ def clean_date(value: object) -> datetime.date | None:
     return None
 
 
+def fecha_inicio_estado(raw_value: object, parsed_value: datetime.date | None) -> str:
+    if not normalize_text(raw_value) or normalize_text(raw_value).casefold() == "sin dato":
+        return "nula"
+    if parsed_value is None:
+        return "no_parseable"
+    return "valida"
+
+
 def get_db_connection():
     if psycopg is None:
         raise RuntimeError("psycopg is required. Install dependencies from requirements.txt.")
@@ -90,50 +104,8 @@ def get_db_connection():
 
 def ensure_stage_tables(conn) -> None:
     with conn.cursor() as cursor:
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS staging.contratos (
-                codigo_contrato TEXT,
-                codigo_expediente TEXT,
-                rfc TEXT,
-                proveedor TEXT,
-                titulo_contrato TEXT,
-                descripcion_contrato TEXT,
-                contract_type TEXT,
-                tipo_contratacion TEXT,
-                tipo_expediente TEXT,
-                importe NUMERIC,
-                moneda TEXT,
-                fecha_inicio DATE,
-                fecha_fin DATE,
-                proveedor_normalizado TEXT,
-                _source_file TEXT,
-                _loaded_at TIMESTAMPTZ DEFAULT NOW()
-            );
-            """
-        )
-        cursor.execute("ALTER TABLE staging.contratos ADD COLUMN IF NOT EXISTS rfc TEXT")
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS staging.listado_69b (
-                rfc TEXT,
-                nombre_del_contribuyente TEXT,
-                situacion_del_contribuyente TEXT,
-                _source_file TEXT,
-                _loaded_at TIMESTAMPTZ DEFAULT NOW()
-            );
-            """
-        )
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS staging.rechazados (
-                source_table TEXT,
-                motivo TEXT,
-                raw_payload JSONB,
-                created_at TIMESTAMPTZ DEFAULT NOW()
-            );
-            """
-        )
+        sql_path = Path(__file__).resolve().parent / "sql" / "03_staging.sql"
+        cursor.execute(sql_path.read_text(encoding="utf-8"))
     conn.commit()
 
 
@@ -194,10 +166,6 @@ def build_staging_contracts(conn, limit: int | None = None) -> dict:
                     errors = []
                     if normalize_text(raw_amount) and importe is None:
                         errors.append("importe_invalido")
-                    if normalize_text(raw_start) and fecha_inicio is None:
-                        errors.append("fecha_inicio_invalida")
-                    if normalize_text(raw_end) and fecha_fin is None:
-                        errors.append("fecha_fin_invalida")
                     if errors:
                         rejected_batch.append(
                             (table_name, ",".join(errors), json.dumps(record, default=str))
@@ -220,6 +188,22 @@ def build_staging_contracts(conn, limit: int | None = None) -> dict:
                             normalize_text(mapped_value(record, "moneda")),
                             fecha_inicio,
                             fecha_fin,
+                            fecha_inicio_estado(raw_start, fecha_inicio),
+                            optional_text(mapped_value(record, "tipo_procedimiento")),
+                            optional_text(mapped_value(record, "ley")),
+                            optional_text(mapped_value(record, "institucion")),
+                            optional_text(mapped_value(record, "clave_institucion")),
+                            optional_text(mapped_value(record, "siglas_de_la_institucion")),
+                            optional_text(mapped_value(record, "tipo_de_institucion")),
+                            optional_text(mapped_value(record, "clave_ramo")),
+                            optional_text(mapped_value(record, "descripcion_ramo")),
+                            optional_text(mapped_value(record, "clave_de_la_uc")),
+                            optional_text(mapped_value(record, "nombre_de_la_uc")),
+                            optional_text(mapped_value(record, "numero_de_procedimiento")),
+                            optional_text(mapped_value(record, "caracter_del_procedimiento")),
+                            optional_text(mapped_value(record, "articulo_de_excepcion")),
+                            optional_text(mapped_value(record, "descripcion_excepcion")),
+                            "comprasmx" if table_name == "contratos_comprasmx" else "historico",
                             normalize_provider(proveedor),
                             record.get("_source_file"),
                         )
@@ -233,8 +217,14 @@ def build_staging_contracts(conn, limit: int | None = None) -> dict:
                                 codigo_contrato, codigo_expediente, rfc, proveedor,
                                 titulo_contrato, descripcion_contrato, contract_type,
                                 tipo_contratacion, tipo_expediente, importe, moneda,
-                                fecha_inicio, fecha_fin, proveedor_normalizado, _source_file
-                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                fecha_inicio, fecha_fin, fecha_inicio_estado,
+                                tipo_procedimiento, ley, institucion, clave_institucion,
+                                siglas_de_la_institucion, tipo_de_institucion, clave_ramo,
+                                descripcion_ramo, clave_de_la_uc, nombre_de_la_uc,
+                                numero_de_procedimiento, caracter_del_procedimiento,
+                                articulo_de_excepcion, descripcion_excepcion, fuente,
+                                proveedor_normalizado, _source_file
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                             """,
                             staged_batch,
                         )

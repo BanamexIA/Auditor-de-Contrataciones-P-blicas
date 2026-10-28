@@ -1,4 +1,4 @@
--- Institucion se compoeta bien 
+
 
 SELECT _source_file, count(*) AS total,
        count(*) FILTER (WHERE institucion IS NOT NULL) AS con_institucion

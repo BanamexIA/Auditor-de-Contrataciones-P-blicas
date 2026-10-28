@@ -1,5 +1,3 @@
-CREATE SCHEMA IF NOT EXISTS staging;
-
 CREATE TABLE IF NOT EXISTS staging.contratos (
     codigo_contrato TEXT,
     codigo_expediente TEXT,
@@ -14,10 +12,45 @@ CREATE TABLE IF NOT EXISTS staging.contratos (
     moneda TEXT,
     fecha_inicio DATE,
     fecha_fin DATE,
+    fecha_inicio_estado TEXT,
+    tipo_procedimiento TEXT,
+    ley TEXT,
+    institucion TEXT,
+    clave_institucion TEXT,
+    siglas_de_la_institucion TEXT,
+    tipo_de_institucion TEXT,
+    clave_ramo TEXT,
+    descripcion_ramo TEXT,
+    clave_de_la_uc TEXT,
+    nombre_de_la_uc TEXT,
+    numero_de_procedimiento TEXT,
+    caracter_del_procedimiento TEXT,
+    articulo_de_excepcion TEXT,
+    descripcion_excepcion TEXT,
+    fuente TEXT,
     proveedor_normalizado TEXT,
     _source_file TEXT,
     _loaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE staging.contratos
+    ADD COLUMN IF NOT EXISTS rfc TEXT,
+    ADD COLUMN IF NOT EXISTS fecha_inicio_estado TEXT,
+    ADD COLUMN IF NOT EXISTS tipo_procedimiento TEXT,
+    ADD COLUMN IF NOT EXISTS ley TEXT,
+    ADD COLUMN IF NOT EXISTS institucion TEXT,
+    ADD COLUMN IF NOT EXISTS clave_institucion TEXT,
+    ADD COLUMN IF NOT EXISTS siglas_de_la_institucion TEXT,
+    ADD COLUMN IF NOT EXISTS tipo_de_institucion TEXT,
+    ADD COLUMN IF NOT EXISTS clave_ramo TEXT,
+    ADD COLUMN IF NOT EXISTS descripcion_ramo TEXT,
+    ADD COLUMN IF NOT EXISTS clave_de_la_uc TEXT,
+    ADD COLUMN IF NOT EXISTS nombre_de_la_uc TEXT,
+    ADD COLUMN IF NOT EXISTS numero_de_procedimiento TEXT,
+    ADD COLUMN IF NOT EXISTS caracter_del_procedimiento TEXT,
+    ADD COLUMN IF NOT EXISTS articulo_de_excepcion TEXT,
+    ADD COLUMN IF NOT EXISTS descripcion_excepcion TEXT,
+    ADD COLUMN IF NOT EXISTS fuente TEXT;
 
 CREATE TABLE IF NOT EXISTS staging.listado_69b (
     rfc TEXT,

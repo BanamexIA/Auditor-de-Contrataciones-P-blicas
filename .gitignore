@@ -16,5 +16,6 @@ venv/
 # Generated benchmark and quality outputs
 eval/results/*
 !eval/results/.gitkeep
+rag/results/*
+!rag/results/.gitkeep
 docs/reporte_calidad.md
-

@@ -1,0 +1,16 @@
+{
+    "fuente":"institución que publica el documento",
+    "tipo":"normas",
+    "titulo":"título oficial del documento",
+    "url_o_ruta":"URL oficial",
+    "posicion":0,
+    "contenido":"texto literal del fragmento",
+    "document_metadata":  
+    {
+        "fecha_publicacion":"fecha verificada"
+        },
+        "metadata":{
+            "articulo":"artículo verificado",
+            "pagina":1
+            }
+        }

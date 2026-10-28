@@ -1,281 +1,265 @@
-# AVANCE 1: Base de datos y prueba de modelos (nube vs local)
+# AVANCE 1 (v2): Base de datos y prueba de modelos
 
-> Instrucciones para Claude Code. Lee este archivo completo antes de tocar nada.
+> Instrucciones para Claude Code. Lee este archivo completo y también `ARQUITECTURA.md` antes de tocar nada.
 > Trabaja **fase por fase**. Al terminar cada fase, ejecuta sus verificaciones, resume lo hecho y **espera confirmación** antes de pasar a la siguiente.
+> Esta versión reemplaza a la anterior: refleja la arquitectura v2 y el estado real del proyecto.
 
-## 0. Contexto del proyecto
+## 0. Contexto
 
-Agente de IA **auditor de contrataciones públicas** (proyecto Banamex, Tec de Monterrey). Genera consultas SQL sobre datos públicos para detectar señales de riesgo (adjudicaciones directas, concentración de proveedores, montos atípicos, coincidencias con el listado 69-B del SAT) y usa RAG para citar normatividad. Los resultados son **señales de riesgo, nunca determinaciones de fraude, corrupción o responsabilidad legal**.
+Agente de IA **auditor de contrataciones públicas** (proyecto Banamex, Tec de Monterrey). Consulta datos públicos con SQL de solo lectura, detecta señales de riesgo, recupera normatividad con RAG y genera reportes con evidencia, fuentes y limitaciones. Sus resultados son **señales para revisión humana, nunca determinaciones de fraude, corrupción o responsabilidad legal**.
 
-**Stack acordado:** React + TypeScript + Vite (frontend), Python + Flask (backend), LangGraph (orquestación), Postgres + pgvector (datos y vectores), Ollama (modelos locales). El diseño usa 4 agentes: consulta, detección, normativo, reportes.
+**Arquitectura vigente (detalle en `ARQUITECTURA.md`):**
+- **Nube (EC2, Docker):** front-end (React, TS, Vite), backend (Flask) con el **orquestador LangGraph dentro**, y Postgres + pgvector.
+- **Local (laptop de cada auditor):** **solo Ollama** (inferencia y embeddings), conectado por **Tailscale**. La laptop no tiene lógica de negocio, tools ni acceso a la BD.
+- **S3** (privado) guarda los reportes finales; la BD guarda la ruta y el hash.
+- **3 agentes**, con lógica en el backend y flujo de orden fijo: **Consulta** (Tool SQL + validador), **Detección + Normativo** (Tool 1 detección determinista, Tool 2 normativo con RAG) y **Reportes** (Tool Reporte).
+- **Docker solo contiene backend, front y BD.** Ollama NO va en el compose.
+- El LLM interpreta, selecciona fragmentos y redacta; **no calcula montos ni define umbrales**.
 
-**Objetivo de este avance (se presenta la próxima semana):**
-1. Base de datos funcionando con los datos reales cargados y su calidad documentada.
-2. Comparación medida de modelos **locales (Ollama) vs nube** para generar SQL, para decidir cuál conviene.
-3. Pruebas de rendimiento, telemetría (tokens y GPU) y opciones de despliegue en la nube, para elegir la **opción más eficiente**.
+**Objetivo de este avance (se presenta pronto):**
+1. Base de datos funcionando con las 3 fuentes cargadas y su calidad documentada.
+2. Pruebas de modelos **locales** con datos medidos (la decisión de que los agentes corran en local ya está tomada: el benchmark debe **justificarla** y elegir el modelo, usando un modelo en nube solo como referencia).
+3. Pruebas de rendimiento, telemetría (tokens y GPU) y un diseño de despliegue.
 
-**Fuera de alcance en este avance:** agentes completos, RAG completo (solo el esqueleto de pgvector), frontend, LSTM.
-
-### Arquitectura de referencia (`Arquitectura_de_IA.png`)
-
-Flujo: Usuario → Front-end (React, TS, Vite) → Backend (Python, Flask) → Orchestrator (LangGraph) → 4 agentes en secuencia (**Consulta** genera el SQL → **Detección** de señales de riesgo → **Normativo** recupera normas por señal → **Reportes** como auditor de IA) → Reporte Final de vuelta al front-end. Cada agente tiene 5 tools (4 genéricas + `Tool SQL`, `Tool Análisis`, `Tool RAG`, `Tool Reporte`). Los agentes corren dentro del bloque "LLM Ollama + Modelo". Postgres (con ORM) se conecta al backend; la **BD vectorial pgvector** queda entre el RAG (Docs, Normas, Enterprise Data) y los agentes; la Ingesta ETL (limpieza, consulta, carga) toma las fuentes públicas. Todo vive dentro del bloque "Contenedores".
-
-Qué toca este avance:
-
-| Componente del diagrama | ¿Se toca en este avance? |
-|---|---|
-| Contenedores (Docker) | Sí (Fase 1) |
-| Front-end React/TS/Vite | No |
-| Backend Flask + ORM | Solo esqueleto con `/health` (Fase 1) |
-| Orchestrator LangGraph | No |
-| LLM Ollama + modelo | Sí (Fases 6, 6B y 7) |
-| 4 agentes y sus tools | No se implementan; el benchmark prueba la capacidad del agente de Consulta (`Tool SQL`) |
-| Postgres (datos) | Sí (Fases 2 a 5) |
-| BD vectorial pgvector | Esqueleto y prueba (Fase 5B) |
-| RAG (Docs, Normas, Enterprise Data) | Solo una muestra mínima de Normas |
-| Ingesta ETL | Sí, para las fuentes tabulares; la ingesta de documentos para RAG queda para después |
-| Telemetría (tokens y GPU) | Sí (Fase 6B); no aparece en el diagrama, pero fue pedida en el feedback |
+**Fuera de alcance en este avance:** implementar los agentes completos, el RAG completo (solo el esqueleto de pgvector), el front-end, la LSTM y el despliegue real en AWS (solo su diseño).
 
 ## 1. Reglas de trabajo
 
-- **Primero inspecciona el repo** (estructura, lenguajes, dependencias) y adapta este plan a lo que ya existe. No reestructures lo que ya funciona sin avisar.
-- **No asumas columnas ni encodings.** Abre los CSV, lee los encabezados y una muestra antes de escribir el ETL.
-- Los CSV originales **no se modifican ni se suben a git** (agrégalos a `.gitignore`; pueden ser muy grandes). Documenta dónde descargarlos en `data/README.md`.
-- Ningún secreto en el repo. Usa `.env` (ignorado) y `.env.example` (versionado).
-- Todo debe correr con comandos documentados. Si algo requiere un paso manual, anótalo en el README.
-- Commits pequeños y con mensajes claros, uno por tarea lógica.
-- Si hay una decisión ambigua, pregunta antes de decidir.
+- **Inspecciona antes de cambiar.** No asumas columnas, nombres ni encodings; verifícalos contra la BD y los archivos.
+- Los CSV originales **no se modifican ni se suben a git** (`data/raw/` ignorado; `data/README.md` documenta URL, fecha y `sha256`).
+- **Todo cambio de esquema va en archivos `.sql` numerados de `etl/sql/`**, nunca aplicado a mano en la BD. Python solo los ejecuta en orden, dentro de una transacción, con conteos antes y después.
+- **Cada tabla que se recree** debe recuperar sus `COMMENT ON` y el `GRANT SELECT` a `agent_ro`. El proceso debe ser **idempotente** (correrlo dos veces da el mismo resultado).
+- Sin secretos en el repo: `.env` ignorado y `.env.example` versionado.
+- Nada de filas descartadas en silencio: lo que no entre a `clean` queda en una tabla de excluidos con motivo (`raw = clean + excluidos`).
+- Los criterios de negocio (clasificación de etiquetas, umbrales) quedan marcados **"pendiente de confirmar"** con el socio formador.
+- Commits pequeños y con mensajes claros. Si algo es ambiguo, pregunta.
+- En Windows el punto de entrada es `python etl/run_etl.py` (no asumas `make`).
 
-## 2. Estructura objetivo (adáptala si el repo ya tiene otra)
+## 2. Estado de las fases
+
+| Fase | Contenido | Estado |
+|---|---|---|
+| 1 | Entorno Docker (db + backend) | Hecha; **ajuste pendiente (Fase 1B)** |
+| 2 | Carga a `raw` (3 fuentes) | Hecha |
+| 3 | Reporte de calidad | Hecha (regenerar tras la 4B) |
+| 4 | `staging` y `clean`, cruce con 69-B | Hecha (Fase 4B ejecutada con fecha de descarga 2026-10-16; 2,441,285 contratos, 14,837 filas 69-B y cero rechazos) |
+| 5 | Diccionario de datos | Hecha: siete tablas y 76 columnas verificadas; comentarios, permisos y consultas de ejemplo comprobados |
+| 5B | Esqueleto pgvector | Pendiente |
+| 6 | Cliente de modelos | Pendiente |
+| 6B | Telemetría | Pendiente |
+| 7 | Benchmark | Pendiente |
+| 8 | Comparativa y decisión | Pendiente |
+| 9 | Diseño de despliegue (documento) | Pendiente |
+
+**Baseline previo a la Fase 4B:** `raw.contratos_comprasmx` 84,676 · `raw.compranet_historico` 2,356,609 · `raw.listado_69b` 14,837 · `clean.contratos` 2,432,330 · `clean.proveedores` 298,131 · `clean.listado_69b` 14,837 · `clean.coincidencias_69b` 817. El clean histórico previo omitía 8,955 filas rechazadas por fechas; esos conteos no son el resultado esperado después de aplicar la Fase 4B.
+
+## 3. Estructura objetivo del repo (adáptala a lo que ya existe)
 
 ```
 .
-├── docker-compose.yml
+├── docker-compose.yml        # db, backend, (front cuando exista). SIN ollama
 ├── .env.example
 ├── README.md
-├── data/
-│   ├── README.md          # de dónde bajar cada archivo
-│   └── raw/               # ignorado por git
+├── agent_host/               # guía y utilidades para la laptop del auditor
+│   ├── README.md             # instalar Ollama + Tailscale, OLLAMA_HOST, firewall
+│   └── check_agent.py        # prueba de conexión, tokens/s y GPU/VRAM
+├── backend/                  # Flask (+ orquestador a futuro)
+├── data/  (README.md; raw/ ignorado)
 ├── etl/
-│   ├── sql/               # DDL: 01_schemas.sql, 02_raw.sql, 03_staging.sql, 04_clean.sql
-│   ├── load_raw.py
-│   ├── build_staging.py
-│   ├── build_clean.py
+│   ├── sql/                  # DDL y transformaciones numeradas
+│   ├── seeds/                # map_tipo_procedimiento.csv
+│   ├── run_etl.py            # punto de entrada único
 │   └── quality_report.py
-├── llm/
-│   ├── base.py            # interfaz común de modelo
-│   ├── ollama_client.py
-│   └── cloud_client.py
-├── backend/               # solo esqueleto Flask (/health) en este avance
-├── telemetry/             # tokens, latencia y GPU/VRAM por llamada
-├── rag/                   # esqueleto del esquema pgvector y prueba de embeddings
-├── eval/
-│   ├── golden_set.yaml
-│   ├── run_benchmark.py
-│   └── results/           # CSV/MD de resultados
-└── docs/
-    ├── diccionario_datos.md
-    ├── reporte_calidad.md
-    └── comparativa_modelos.md
+├── llm/                      # base.py, ollama_client.py, cloud_client.py (solo referencia)
+├── telemetry/
+├── rag/
+├── eval/                     # golden_set.yaml, run_benchmark.py, results/
+├── scripts/                  # check_comentarios.sql, check_calidad.sql, check_conteos.sql
+├── tests/
+└── docs/                     # arquitectura, diccionario, calidad, comparativa, despliegue
 ```
 
 ---
 
-## FASE 1: Entorno reproducible
+## FASE 1B: Ajustar el entorno a la arquitectura v2
 
 **Tareas**
-1. Crear `docker-compose.yml` con:
-   - Servicio `db`: imagen `pgvector/pgvector` (versión de Postgres estable reciente), volumen persistente, puerto configurable por `.env`, healthcheck.
-   - Servicio `ollama`: imagen oficial `ollama/ollama`, volumen para modelos. Dejar comentada la sección de GPU con instrucciones.
-2. Crear `.env.example` con: usuario, contraseña, nombre de BD, host, puerto, URL de Ollama.
-3. Script o comando para inicializar la BD ejecutando los `.sql` de `etl/sql/` en orden.
-4. Habilitar la extensión `vector` en un script de init.
-5. Crear **dos roles** en Postgres:
-   - `etl_user`: puede escribir en `raw`, `staging`, `clean`.
-   - `agent_ro`: **solo lectura** únicamente sobre `clean` y `rag` (y vistas). Este será el rol que use el agente.
-6. Crear los esquemas `raw`, `staging`, `clean`, `rag`, `telemetry` y `audit` en el script de init. **Decisión por defecto:** una sola instancia de Postgres con pgvector, con los vectores en el esquema `rag` (el diagrama dibuja la BD y la BD vectorial como cajas separadas; si el equipo prefiere dos instancias, documenta el motivo).
-7. Servicio `backend` mínimo (Dockerfile propio, Flask con `/health` y `/health/db`, conexión con SQLAlchemy) para respetar la arquitectura de contenedores. Sin lógica de negocio todavía. Ojo: la `Tool SQL` del agente no debe pasar por el ORM; usará una conexión directa con `agent_ro`.
-8. Documentar en el README cómo levantar todo desde cero.
+1. Quitar el servicio `ollama` del `docker-compose.yml` (y su `profile`). Quitar cualquier `depends_on` hacia él.
+2. En el backend, la URL del modelo se lee de la variable `AGENT_BASE_URL` (por defecto `http://host.docker.internal:11434`, que en desarrollo apunta al Ollama de Windows). Mantén `extra_hosts: ["host.docker.internal:host-gateway"]`. Actualiza `.env.example`.
+3. Crear `agent_host/README.md` con la guía para la laptop: instalar Ollama, descargar el modelo, instalar Tailscale, cambiar `OLLAMA_HOST` y **limitar el acceso con el firewall a la interfaz de Tailscale** (Ollama no tiene autenticación).
+4. Crear `agent_host/check_agent.py`: llama a `/api/tags`, hace una generación corta y reporta tokens/s, latencia y (si hay GPU NVIDIA) uso de VRAM. Si no hay GPU, imprime `null` y no falla.
+5. Crear (solo DDL) las tablas `audit.bitacora` y `audit.reportes` (`caso_id`, `s3_uri`, `sha256`, `version`, `modelo`, `equipo`, `created_at`) y un registro de agentes `audit.agentes` (`usuario`, `nombre_tailnet`, `modelo`, `estado`, `ultima_verificacion`). Sin lógica todavía.
+6. Actualizar el README.
 
 **Verificación**
-- `docker compose up -d` deja `db` y `ollama` saludables.
-- `SELECT extname FROM pg_extension;` muestra `vector`.
-- Con `agent_ro`, un `INSERT` o `DROP` **falla** y un `SELECT` sobre `clean` funciona.
-- `/health/db` responde OK desde el contenedor `backend`.
+- `docker compose up -d --build` levanta solo `db` y `backend`, sin errores de puerto.
+- `/health` y `/health/db` responden 200.
+- Desde el backend: `docker compose exec backend python -c "import urllib.request,os; print(urllib.request.urlopen(os.environ['AGENT_BASE_URL']+'/api/tags', timeout=5).read()[:200])"` devuelve el JSON de Ollama.
+- `python agent_host/check_agent.py` funciona en la laptop.
 
 ---
 
-## FASE 2: Ingesta a la capa `raw`
+## FASE 4B: Cerrar la limpieza de `clean.contratos`
 
-**Archivos de entrada** (en `data/raw/`):
-- `contratos_comprasmx_2026.csv`: contratos de Datos Abiertos ComprasMX (la exploración del equipo reporta 84,676 registros y 73 columnas, ~102 MB; las columnas observadas en el visor incluyen `codigo_contrato`, `codigo_expediente`, `proveedor`, `titulo_contrato`, `descripcion_contrato`, `contract_type`, `tipo_contratacion`, `tipo_expediente`, `importe`, `moneda`, `fecha_inicio`, `fecha_fin`; **verifica contra el archivo real**).
-- `Listado_completo_69-B.csv`: listado del artículo 69-B del SAT (la exploración reporta 14,837 registros y 20 columnas, actualizado al 31 de agosto de 2026). Suele traer líneas de encabezado/notas antes de la tabla y encoding no UTF-8; **inspecciónalo**.
+Problemas detectados con datos reales:
+- `clean.contratos` mezcla dos fuentes. **ComprasMX trae institución, ramo, unidad compradora, ley y fundamento de excepción; el histórico NO** (solo 16 columnas útiles, sin dependencia ni RFC).
+- `tipo_expediente` está **vacío para las 84,676 filas de ComprasMX** (el dato equivalente está en `tipo_procedimiento`).
+- El histórico tiene 56 etiquetas distintas de procedimiento con prefijos de versión y numeración (`V20151220 12. Adjudicación Directa …`).
+- Antes de la Fase 4B, 8,955 filas del histórico estaban en `staging.rechazados`: 3,648 por fecha fin, 17 por fecha inicio y 5,290 por ambas; los rechazos observados corresponden a fechas vacías/no parseables, no a duplicados exactos. La consulta de duplicados exactos del histórico encontró cero grupos.
+- Hay fechas imposibles (1900-01-11 y otras anteriores a 2010) y no hay datos con fecha de inicio en 2025; 2023 y 2024 tienen cobertura parcial.
 
-**Tareas**
-1. Escribir un script que detecte encoding y delimitador de cada CSV y los reporte.
-2. Crear tablas `raw.contratos_comprasmx` y `raw.listado_69b` con **todas las columnas como `TEXT`** (sin transformar nada) más columnas de trazabilidad: `_source_file`, `_loaded_at`, `_row_number`.
-3. Cargar con `COPY` (o `psycopg` `copy`) por lotes; **no usar inserts fila por fila**. Mostrar progreso.
-4. El script debe ser **idempotente**: volver a correrlo no duplica datos (truncar y recargar la tabla raw, o usar un identificador de carga).
-5. Registrar conteos: filas en el archivo vs filas en la tabla.
+**Tareas** (todo en SQL dentro de `etl/sql/`, ejecutado por `etl/run_etl.py`)
+1. Habilitar la extensión `unaccent` (en el script de init, como superusuario).
+2. Crear `clean.map_tipo_procedimiento` cargada desde `etl/seeds/map_tipo_procedimiento.csv`. Aplicar la regla de **menor prioridad cuyo prefijo coincida con el inicio** de la etiqueta normalizada:
+   ```sql
+   upper(unaccent(regexp_replace(btrim(etiqueta), '^(V[0-9]{8}\s+)?([0-9]+\.\s*)?', '')))
+   ```
+   Vacío y `Sin dato` → `sin_dato`. Sin regla → `otro` con la marca `sin_regla`, y lista esas etiquetas al final del proceso. No uses `split_part` ni `LIKE '%…%'` para clasificar.
+3. Contenido inicial del seed (todo `pendiente` de confirmar con el socio formador):
+   ```csv
+   fuente,prefijo,tipo_normalizado,prioridad,estado
+   comprasmx,ADJUDICACION DIRECTA,adjudicacion_directa,10,pendiente
+   comprasmx,INVITACION A CUANDO MENOS 3,invitacion_tres_personas,20,pendiente
+   comprasmx,LICITACION PUBLICA,licitacion_publica,30,pendiente
+   comprasmx,PROCEDIMIENTO DE ASIGNACION DERIVADO DE UN ACUERDO MARCO,otro,40,pendiente
+   comprasmx,ENTRE ENTES PUBLICOS,otro,50,pendiente
+   historico,ADJUDICACION DIRECTA,adjudicacion_directa,10,pendiente
+   historico,INVITACION A CUANDO MENOS TRES,invitacion_tres_personas,20,pendiente
+   historico,LICITACION PUBLICA,licitacion_publica,30,pendiente
+   historico,PROYECTO DE CONVOCATORIA,otro,40,pendiente
+   historico,PROYECTO DE ASOCIACION PUBLICO PRIVADA,otro,40,pendiente
+   historico,CONTRATOS ENTRE ENTES PUBLICOS,otro,40,pendiente
+   historico,VENTA BIENES NO UTILES,otro,40,pendiente
+   historico,REPORTE DE OTRAS CONTRATACIONES,otro,40,pendiente
+   ```
+4. Conservar `tipo_expediente` y `tipo_procedimiento` originales y agregar `tipo_procedimiento_norm` y `ley` (en el histórico, extraída del final de la etiqueta: LAASSP, LOPSRM, LAPP o estatal; en ComprasMX, de la columna `ley`). Las reglas iniciales quedan en estado `pendiente`; los reportes deben llamarlas “clasificación preliminar”.
+5. Agregar a `clean.contratos`, desde `raw.contratos_comprasmx`: `institucion`, `clave_institucion`, `siglas_de_la_institucion`, `tipo_de_institucion`, `clave_ramo`, `descripcion_ramo`, `clave_de_la_uc`, `nombre_de_la_uc`, `numero_de_procedimiento`, `caracter_del_procedimiento`, `articulo_de_excepcion`, `descripcion_excepcion`. **Nulas para el histórico**, y cada `COMMENT ON` debe decirlo.
+6. Agregar `clean.config_calidad` con límites inclusivos de inicio 2010-01-01 y 2026-12-31. `run_etl.py` exige la fecha real de descarga; `fecha_inicio_estado` toma `valida`, `nula`, `no_parseable` o `fuera_de_rango`; `fecha_inicio_valida` es verdadera solo dentro del rango. Agregar `fecha_inicio_futura` como bandera informativa (no invalida) y `fecha_fin_antes_inicio`. No borres filas por sus fechas.
+7. Las 8,955 filas con fechas vacías/no parseables vuelven a `clean`; no se excluyen por fechas. La tabla de excluidos se reserva para filas que no puedan representarse, como filas vacías o duplicados exactos. Debe cumplirse `raw = clean + excluidos` por fuente y por tipo normalizado. No excluir por duplicidad de `codigo_contrato` sin evidencia de duplicado exacto.
+8. Crear la vista `clean.v_cobertura_fuentes` (año, fuente, filas) y documentar que no hay datos de 2025 y que 2023 y 2024 son parciales.
+9. Recrear las tablas con sus `COMMENT ON` y `GRANT SELECT` a `agent_ro`. Actualizar el diccionario (`project_code`, `work_category_id` y `ff_fecha_inicio/fin` como "POR CONFIRMAR").
+10. Crear las vistas aprobadas para el agente (`clean.v_contratos_agente`, `clean.v_coincidencias_69b_agente`), con comentarios en vistas y columnas.
 
 **Verificación**
-- Conteo en la BD = conteo de líneas de datos del CSV (explica cualquier diferencia).
-- Una muestra de 10 filas aleatorias coincide con el archivo original.
-- Tiempos de carga anotados en `docs/reporte_calidad.md`.
+- **Conteos esperados de ComprasMX (exactos, derivados de `raw`):** `adjudicacion_directa` 58,868 · `invitacion_tres_personas` 5,402 · `licitacion_publica` 17,307 · `otro` 49 · `sin_dato` 3,050 · total **84,676**.
+- Los conteos históricos anteriores (que sumaban 2,347,654) corresponden al clean previo y no son un esperado tras recuperar las 8,955 filas. Calcula un `GROUP BY` independiente sobre `raw` y valida `raw_tipo = clean_tipo + excluidos_tipo` con la misma clasificación.
+- Cero etiquetas `sin_regla` (o una lista explicada).
+- `raw = clean + excluidos` para cada fuente.
+- `check_comentarios.sql` devuelve cero filas, `agent_ro` lee las tablas nuevas y el proceso se puede repetir con el mismo resultado.
+- Regenerar `docs/reporte_calidad.md` por fuente.
 
 ---
 
-## FASE 3: Reporte de calidad de datos
-
-**Tareas** (`etl/quality_report.py` → genera `docs/reporte_calidad.md`)
-Para cada tabla raw, calcular y reportar:
-- Total de filas, columnas y tamaño en disco.
-- % de nulos/vacíos por columna.
-- Cardinalidad por columna (valores distintos).
-- Duplicados en `codigo_contrato` y `codigo_expediente`.
-- `importe`: valores en cero, negativos, no numéricos, y los percentiles (p50, p90, p99, máximo).
-- `moneda`: distribución de valores y variantes.
-- Fechas: formatos distintos, no parseables, `fecha_fin < fecha_inicio`, fechas fuera de rango razonable.
-- `proveedor`: variantes del mismo nombre (mayúsculas, acentos, puntuación, sufijos como S.A. de C.V.), vacíos.
-- Valores categóricos (`tipo_contratacion`, `tipo_expediente`, etc.): lista de valores y frecuencias, para ver inconsistencias.
-- Para 69-B: distribución de la columna de situación del contribuyente, RFC con formato inválido, duplicados.
-
-Terminar el reporte con una sección **"Hallazgos y decisiones de limpieza propuestas"**: lista priorizada de problemas y qué se propone hacer con cada uno.
-
-**Verificación:** el reporte se regenera con un solo comando y es legible por humanos.
-
----
-
-## FASE 4: Capas `staging` y `clean`
+## FASE 5: Verificar el diccionario de datos
 
 **Tareas**
-1. **`staging`**: convertir tipos (fechas a `DATE`, importes a `NUMERIC`, normalizar moneda), recortar espacios, estandarizar mayúsculas. Las filas que no se puedan convertir **no se descartan en silencio**: van a una tabla `staging.rechazados` con el motivo.
-2. **`clean`**: tablas listas para consulta, con nombres de columna claros en español o inglés (decide uno y sé consistente). Mínimo:
-   - `clean.contratos`
-   - `clean.proveedores` (nombre normalizado + variantes)
-   - `clean.listado_69b`
-3. **Normalización de proveedor**: función/columna `proveedor_normalizado` (sin acentos, mayúsculas, sin puntuación, sufijos societarios estandarizados). Documentar las reglas exactas.
-4. **Cruce proveedor ↔ 69-B**: crear `clean.coincidencias_69b` indicando el criterio del match (`rfc_exacto` si existe RFC en ambos lados, si no `nombre_normalizado_exacto`). **No usar fuzzy matching todavía.** Incluir una columna de `nivel_confianza` y un campo `requiere_revision_humana = true` para coincidencias solo por nombre.
-5. **Índices** sobre las columnas de filtro y join más probables (proveedor, fechas, tipo de contratación, importe, RFC). Documentar cuáles y por qué.
-6. Crear **vistas** simplificadas para el agente (por ejemplo `clean.v_contratos_agente`) con nombres claros y comentarios (`COMMENT ON`) en tablas y columnas. Estos comentarios alimentarán el prompt del agente de consulta.
-7. Dar `GRANT SELECT` solo sobre `clean` al rol `agent_ro`.
+1. `scripts/verify_fase5.py`: compara las columnas de `clean` (desde `information_schema`) con `docs/diccionario_datos.md`, por tabla, e incluye los tipos. Termina con código distinto de 0 si hay discrepancias.
+2. Cada columna del diccionario indica: significado, **fuente(s) de origen** (ComprasMX, histórico o ambas), columna original, regla de limpieza, riesgo de calidad y marca de datos personales. Los significados dudosos se marcan **"POR CONFIRMAR"**; no inventes ninguno.
+3. Datos personales (nombre del proveedor persona física, RFC) marcados, y vistas del agente con los campos mínimos.
+4. Generar la lista de preguntas para el socio formador a partir de los "POR CONFIRMAR".
 
 **Verificación**
-- Conteos: raw = staging + rechazados (explica la diferencia si existe).
-- Ninguna fila de `clean.contratos` con importe nulo no justificado.
-- El cruce con 69-B reporta cuántas coincidencias salen por RFC y cuántas por nombre.
-- Medir y anotar el tiempo de 4 consultas representativas **antes y después** de crear los índices:
-  1. Total de contratos y suma de importes por año.
-  2. Top 20 proveedores por importe.
-  3. Proporción de adjudicaciones directas por dependencia.
-  4. Contratos de proveedores que aparecen en 69-B.
+- `check_comentarios.sql`: cero filas (columnas, tablas y vistas de `clean`).
+- `verify_fase5.py` sin discrepancias.
+- Muestreo manual de 10 columnas contra datos reales.
+- Prueba funcional: con solo el diccionario se puede escribir el SQL de 5 preguntas del golden set.
 
 ---
 
-## FASE 5: Diccionario de datos
-
-**Tarea:** generar `docs/diccionario_datos.md` con, por cada columna de `clean`: nombre, tipo, significado, origen (columna raw), reglas de limpieza aplicadas, riesgos de calidad y consideraciones de privacidad (por ejemplo, proveedores que son personas físicas). Donde el significado no sea evidente, marcar **"POR CONFIRMAR"** en lugar de inventarlo.
-
----
-
-## FASE 5B: Esqueleto de la BD vectorial (pgvector)
-
-El diagrama coloca la BD vectorial entre el RAG y los agentes. En este avance solo se valida que funcione y cuánto rinde; la ingesta completa de normas y documentos queda para el siguiente.
+## FASE 5B: Esqueleto de la BD vectorial
 
 **Tareas**
-1. Crear en el esquema `rag`: `rag.documentos` (id, fuente, tipo [`docs` | `normas` | `enterprise`], título, url o ruta, metadata JSONB, fecha de carga) y `rag.chunks` (id, documento_id, contenido, `embedding vector(N)`, metadata JSONB, posición).
-2. Elegir un **modelo de embeddings disponible en Ollama** y leer su dimensión real (no asumirla); definir `N` con ese valor.
-3. Cargar una **muestra pequeña de normatividad pública real** (5 a 10 fragmentos que el equipo descargue; no inventes texto normativo) y generar sus embeddings.
-4. Crear un índice vectorial (HNSW o IVFFlat) y documentar por qué se eligió.
-5. Probar 5 consultas de similitud, registrar la latencia y revisar a mano si los fragmentos recuperados son pertinentes.
-6. Dar `GRANT SELECT` sobre `rag` a `agent_ro`.
+1. Esquema `rag`: `rag.documentos` (fuente, tipo [`docs` | `normas` | `enterprise`], ley, versión, fecha de publicación en el DOF, fecha de entrada en vigor, fecha de abrogación, URL, `sha256`, fecha de carga) y `rag.chunks` (documento, contenido, `embedding vector(N)`, ruta jerárquica ley-título-capítulo-artículo, metadata JSONB).
+2. Elegir un **modelo de embeddings de Ollama** y leer su dimensión real; ese mismo modelo se usará para indexar y para consultar (los embeddings se generan en la laptop).
+3. Cargar **5 a 10 fragmentos reales** de normatividad pública descargados de fuentes oficiales (Cámara de Diputados o DOF), incluyendo artículos de la LAASSP vigente y de la abrogada, para probar el filtro por vigencia. **No inventes ni resumas el texto normativo.**
+4. Índice vectorial (HNSW o IVFFlat) y justificación.
+5. 5 consultas de similitud con latencia y revisión manual de pertinencia. El filtro por vigencia compara la fecha del contrato con las fechas de entrada en vigor y abrogación.
+6. `GRANT SELECT` sobre `rag` a `agent_ro`.
 
-**Verificación:** la consulta de similitud devuelve resultados ordenados por distancia, con tiempos anotados y la revisión manual registrada en `docs/comparativa_modelos.md` (sección de embeddings).
+**Verificación:** resultados ordenados por distancia, tiempos anotados y revisión registrada en `docs/comparativa_modelos.md` (sección de embeddings).
 
 ---
 
-## FASE 6: Capa de modelos intercambiable
+## FASE 6: Cliente de modelos
 
 **Tareas**
-1. `llm/base.py`: interfaz común, por ejemplo `generate(system: str, prompt: str, temperature: float = 0.0) -> LLMResponse`, donde `LLMResponse` incluye texto, tokens de entrada/salida (si el proveedor los entrega) y latencia.
-2. `llm/ollama_client.py`: cliente para Ollama (URL y modelo por `.env`).
-3. `llm/cloud_client.py`: cliente para un proveedor en nube (clave por `.env`; si no hay clave, el cliente debe fallar con un mensaje claro, no con un traceback críptico). Dejar el proveedor concreto configurable.
-4. Selección del proveedor/modelo **solo por variable de entorno**, sin tocar código.
-5. Pruebas mínimas (con mocks) de que la interfaz funciona.
+1. `llm/base.py`: interfaz común `generate(system, prompt, temperature=0.0) -> LLMResponse` (texto, tokens de entrada y salida, latencia).
+2. `llm/ollama_client.py`: usa `AGENT_BASE_URL` (en producción será el nombre del equipo en la red de Tailscale). Modelo por variable de entorno.
+3. `llm/cloud_client.py`: **solo referencia de comparación** en el benchmark, con clave por `.env`; sin clave, falla con un mensaje claro.
+4. Pruebas con mocks.
 
 ---
 
-## FASE 6B: Módulo de telemetría (tokens y GPU)
-
-Fue pedido en el feedback de la arquitectura. Debe servir para el benchmark ahora y para cada agente después.
+## FASE 6B: Telemetría (tokens y GPU)
 
 **Tareas**
-1. Crear `telemetry/` con un decorador o context manager (`track_llm_call`) que envuelva cualquier llamada a un cliente de `llm/`.
-2. Por llamada, registrar: marca de tiempo, agente (o `benchmark`), proveedor, modelo, tokens de entrada y salida, latencia total, tokens/s y, si hay streaming, tiempo al primer token. Para Ollama, usar los campos de conteo de tokens y duraciones que ya devuelve su API; para nube, los que reporte el proveedor.
-3. Registrar métricas de hardware durante la llamada: utilización de GPU y VRAM usada (con `pynvml` o `nvidia-smi`), y CPU/RAM del proceso. Si no hay GPU NVIDIA (por ejemplo, una Mac con Apple Silicon), guardar `null`, documentarlo y **no fallar**.
-4. Guardar en `telemetry.llm_calls` (Postgres) y permitir exportar a CSV.
-5. Crear la tabla vacía `audit.bitacora` (pregunta, SQL generado, resultado, modelo, usuario, marca de tiempo) para la bitácora de auditoría del MVP. Sin lógica todavía.
-6. Pruebas mínimas con un cliente falso.
-
-**Verificación:** una llamada real a Ollama deja un registro en `telemetry.llm_calls` con tokens, latencia y VRAM (o `null` documentado).
+1. Decorador `track_llm_call` que envuelve cualquier llamada de `llm/`. Registra marca de tiempo, agente, proveedor, modelo, tokens de entrada y salida, latencia, tokens/s y tiempo al primer token. Para Ollama usa los campos de conteo y duración que devuelve su API.
+2. Guardar en `telemetry.llm_calls` y permitir exportar a CSV.
+3. **Las métricas de GPU y VRAM solo se pueden leer en la máquina que ejecuta el modelo.** Con Ollama en la laptop, el backend no las ve. Por eso las recoge `agent_host/check_agent.py` y el benchmark se **ejecuta en esa máquina**. En producción, el backend solo registra tokens y latencia. Si no hay GPU NVIDIA, guarda `null` y no falla.
+4. La bitácora registra el modelo exacto, su cuantización, la versión de Ollama y el equipo en cada ejecución.
+5. Pruebas con un cliente falso.
 
 ---
 
-## FASE 7: Benchmark de text-to-SQL
+## FASE 7: Benchmark de text-to-SQL y rendimiento
 
 **Tareas**
-1. `eval/golden_set.yaml`: **mínimo 20 preguntas** en lenguaje natural, cada una con `id`, `pregunta`, `dificultad` (simple/media/dificil), `sql_esperado` y `notas`. Cubrir: filtros simples, agregaciones, group by, joins con 69-B, fechas, montos y adjudicaciones directas. Generar el SQL esperado **y verificar que se ejecuta** contra la BD real.
-2. `eval/run_benchmark.py`:
-   - Construye el prompt con el esquema de las vistas del agente (tomando los `COMMENT ON` de la BD), reglas de seguridad y, opcionalmente, 2 o 3 ejemplos few-shot (que **no** estén en el golden set).
-   - Recibe como parámetro la lista de modelos a probar.
-   - Para cada pregunta y modelo: genera el SQL, lo **valida** (solo `SELECT`, tablas permitidas, `LIMIT`, timeout) y lo ejecuta con `agent_ro`.
-   - Compara el **resultado** con el del SQL esperado (execution accuracy, no comparación de texto).
-   - Repite cada pregunta 3 veces para medir consistencia.
-   - Guarda resultados crudos en `eval/results/` (CSV) y un resumen.
-3. Métricas por modelo: % SQL válido, % resultado correcto (global y por dificultad), % que respeta las reglas de seguridad, latencia (mediana y p95), tokens y tokens/s, VRAM pico y utilización de GPU (desde el módulo de telemetría), costo estimado por 1,000 consultas (nube) y consistencia entre repeticiones.
-4. Modelos a probar (confirmar con el equipo según hardware y créditos): **al menos 2 locales** en Ollama (uno de ~7-8B y uno mayor si el hardware lo permite) y **al menos 1 en nube**. Verifica nombres de modelos y precios vigentes antes de correr; cambian seguido.
+1. `eval/golden_set.yaml`: **20 o más preguntas** (`id`, `pregunta`, `dificultad`, `sql_esperado`, `notas`), cubriendo filtros, agregaciones, joins con 69-B, fechas, montos y adjudicaciones directas. Considera que **dependencia solo existe en ComprasMX 2026**; incluye casos de "sin datos para ese periodo" (2025) y de información inexistente. Verifica que cada `sql_esperado` se ejecute.
+2. `eval/run_benchmark.py`: arma el prompt con el esquema de las **vistas del agente** (usando los `COMMENT ON`), reglas de seguridad y pocos ejemplos que no estén en el golden set; recibe la lista de modelos; valida el SQL (solo `SELECT`, tablas permitidas, `LIMIT`, tiempo máximo) y lo ejecuta con `agent_ro`; compara **resultados** (no texto); repite cada pregunta 3 veces.
+3. Métricas por modelo: % de SQL válido, % de resultado correcto (global y por dificultad), % que respeta las reglas de seguridad, latencia p50 y p95, tokens y tokens/s, VRAM pico y uso de GPU, consistencia entre repeticiones y, para el modelo en nube, costo estimado por 1,000 consultas.
+4. Modelos: **al menos 2 locales** (uno de ~7-8B y uno mayor si el hardware lo permite) más **1 en nube como referencia**. Verifica nombres y precios vigentes antes de correr.
+5. Embeddings: latencia por fragmento, dimensión y calidad de recuperación.
+6. **Rendimiento:** corre con 1, 2, 4 y 8 solicitudes concurrentes; registra throughput, p50 y p95, VRAM pico, errores y tiempos de espera, y la configuración de paralelismo de Ollama. Repite 4 consultas representativas de la BD bajo concurrencia.
+7. Registra en cada resultado el hardware (CPU, RAM, GPU) y dónde corrió.
 
-5. **Embeddings:** medir el modelo de embeddings elegido en la Fase 5B (latencia por fragmento, dimensión y calidad de recuperación en las 5 consultas de prueba). Si hay tiempo, comparar uno local con uno en nube.
-6. **Pruebas de rendimiento:** para cada modelo local y para el de nube, correr el benchmark con 1, 2, 4 y 8 solicitudes concurrentes. Registrar throughput (tokens/s totales), latencia p50/p95, VRAM pico, errores y timeouts. Documentar la configuración de paralelismo de Ollama usada. Repetir con las 4 consultas representativas de la BD bajo concurrencia, para ver si Postgres es el cuello de botella.
-
-**Verificación:** un solo comando corre el benchmark y produce una tabla comparativa reproducible. Registrar en los resultados el hardware usado (CPU, RAM, GPU) para que las latencias locales sean interpretables.
+**Verificación:** un solo comando produce una tabla comparativa reproducible en `eval/results/`.
 
 ---
 
-## FASE 8: Documento de comparativa
+## FASE 8: Comparativa y decisión
 
-**Tarea:** generar `docs/comparativa_modelos.md` con:
+**`docs/comparativa_modelos.md`:**
 1. Metodología (golden set, métricas, hardware, fecha).
 2. Tabla de resultados por modelo.
-3. Análisis: dónde falla cada modelo (tipos de error más comunes).
-4. Comparación cualitativa nube vs local: costo, latencia, privacidad, reproducibilidad, dependencias de despliegue.
-5. **Recomendación preliminar** con sus límites (qué no se midió).
-6. **Eficiencia:** definir y calcular métricas para identificar la opción más eficiente, por ejemplo costo por consulta correcta, tokens/s por GB de VRAM y exactitud por segundo. Explicar la fórmula usada.
-7. **Opciones de despliegue en la nube:** describir 2 o 3 alternativas (por ejemplo, una VM con GPU que aloje todo; servicios gestionados para backend y BD con inferencia por API; un esquema híbrido) y compararlas por costo mensual estimado, escalabilidad, latencia, operación y privacidad. Verifica precios vigentes, no inventes cifras y marca cuáles son estimaciones.
+3. Dónde falla cada modelo (tipos de error).
+4. **Justificación de la decisión de ejecutar los agentes en local**, con los datos medidos: exactitud, latencia, privacidad, control y reproducibilidad, frente a la referencia en nube. Declara las desventajas (hardware por equipo, equipos apagados) y qué no se midió.
+5. **Hardware mínimo recomendado** y lista de modelos permitidos.
+6. Métricas de eficiencia (por ejemplo, costo por consulta correcta y tokens/s por GB de VRAM) con su fórmula.
+7. Embeddings: modelo elegido y por qué.
 8. Riesgos y siguientes pasos.
 
-No presentes conclusiones que los datos no respalden. Si la muestra es pequeña, dilo.
+No presentes conclusiones que los datos no respalden; si la muestra es pequeña, dilo.
+
+---
+
+## FASE 9: Diseño de despliegue (documento, sin implementar)
+
+**`docs/despliegue.md`:**
+- Dimensionamiento de la instancia EC2 según el tamaño de la BD y el volumen EBS (sin cifras inventadas; márcalas como estimación).
+- Grupo de seguridad: solo HTTPS expuesto; Postgres sin acceso público.
+- Respaldos de la BD a S3 y el plan de recuperación.
+- Bucket de reportes: privado, cifrado, acceso público bloqueado, rol IAM mínimo para la instancia, URLs prefirmadas y convención de rutas (`reportes/{caso_id}/{version}.pdf`).
+- Borrador de ACLs de Tailscale por etiquetas (backend → agentes; agentes sin acceso entre sí) y cómo alcanza el contenedor del backend la red de Tailscale.
+- Gestión de secretos.
+- Manejo de agente apagado y de un registro de agentes por usuario.
 
 ---
 
 ## Definición de "avance listo"
 
-- [ ] `docker compose up` levanta Postgres+pgvector y Ollama desde cero con el README.
-- [ ] Datos reales cargados en `raw` con conteos verificados.
-- [ ] `docs/reporte_calidad.md` generado y con hallazgos priorizados.
-- [ ] `staging` y `clean` construidos; rechazados documentados.
-- [ ] Cruce con 69-B hecho, con criterio y nivel de confianza.
-- [ ] Rol `agent_ro` de solo lectura verificado.
-- [ ] `docs/diccionario_datos.md` con "POR CONFIRMAR" donde corresponda.
-- [ ] Contenedor `backend` mínimo respondiendo `/health` y `/health/db`.
-- [ ] Esquema `rag` con pgvector probado con una muestra real de normas y 5 consultas de similitud.
-- [ ] Interfaz de modelos intercambiable (Ollama / nube) por variable de entorno.
-- [ ] Módulo de telemetría registrando tokens, latencia y GPU/VRAM por llamada.
-- [ ] Benchmark ejecutado con al menos 3 modelos, incluidas las pruebas de concurrencia, y resultados guardados.
-- [ ] `docs/comparativa_modelos.md` con tabla, métricas de eficiencia, opciones de despliegue en la nube y recomendación preliminar.
+- [ ] `docker compose up` levanta solo `db` y `backend` (sin Ollama) con el README.
+- [ ] `agent_host/` con guía y `check_agent.py` funcionando en la laptop.
+- [x] Las 3 fuentes cargadas en `raw` con conteos verificados.
+- [x] `clean.contratos` con tipo de procedimiento normalizado, columnas de dependencia (ComprasMX), banderas de fecha, tabla de excluidos y `raw = clean + excluidos`.
+- [x] Conteos por tipo normalizado coinciden con los esperados.
+- [x] 0 columnas, tablas y vistas de `clean` sin comentario; `verify_fase5.py` sin discrepancias.
+- [ ] Rol `agent_ro` de solo lectura verificado (también sobre `rag`).
+- [ ] Esquema `rag` probado con una muestra real de normas y 5 consultas de similitud.
+- [ ] Telemetría de tokens, latencia y GPU/VRAM en la máquina del modelo.
+- [ ] Benchmark con al menos 3 modelos, pruebas de concurrencia y resultados guardados.
+- [ ] `docs/comparativa_modelos.md` con la justificación de la decisión local y el hardware mínimo.
+- [ ] `docs/despliegue.md` y `ARQUITECTURA.md` actualizados.
 
 ## Cómo empezar
 
-Primera instrucción sugerida para Claude Code:
-
-> Lee `AVANCE_1_PLAN.md`. Inspecciona el repo y dime qué ya existe y qué ajustarías del plan. No cambies nada todavía. Después ejecuta la Fase 1.
+> Lee `AVANCE_1_PLAN.md` y `ARQUITECTURA.md`. Inspecciona el repo y la BD, dime qué de lo descrito ya existe y qué ajustarías. No cambies nada todavía. Después ejecuta la Fase 1B.

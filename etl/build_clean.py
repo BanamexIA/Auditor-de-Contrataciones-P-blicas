@@ -6,6 +6,7 @@ import json
 import os
 import re
 import unicodedata
+from pathlib import Path
 
 try:
     import psycopg
@@ -49,68 +50,9 @@ def get_db_connection():
 
 def ensure_clean_tables(conn) -> None:
     with conn.cursor() as cursor:
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS clean.proveedores (
-                proveedor TEXT,
-                proveedor_normalizado TEXT,
-                fuente TEXT,
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                PRIMARY KEY (proveedor_normalizado)
-            );
-            """
-        )
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS clean.contratos (
-                codigo_contrato TEXT,
-                codigo_expediente TEXT,
-                rfc TEXT,
-                proveedor TEXT,
-                proveedor_normalizado TEXT,
-                titulo_contrato TEXT,
-                descripcion_contrato TEXT,
-                contract_type TEXT,
-                tipo_contratacion TEXT,
-                tipo_expediente TEXT,
-                importe NUMERIC,
-                moneda TEXT,
-                fecha_inicio DATE,
-                fecha_fin DATE,
-                _source_file TEXT,
-                _loaded_at TIMESTAMPTZ
-            );
-            """
-        )
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS clean.listado_69b (
-                rfc TEXT,
-                nombre_del_contribuyente TEXT,
-                situacion_del_contribuyente TEXT,
-                _source_file TEXT,
-                _loaded_at TIMESTAMPTZ
-            );
-            """
-        )
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS clean.coincidencias_69b (
-                codigo_contrato TEXT,
-                rfc_exacto BOOLEAN,
-                nombre_normalizado_exacto BOOLEAN,
-                nivel_confianza TEXT,
-                requiere_revision_humana BOOLEAN,
-                proveedor TEXT,
-                rfc TEXT,
-                nombre_del_contribuyente TEXT,
-                created_at TIMESTAMPTZ DEFAULT NOW()
-            );
-            """
-        )
-    conn.commit()
-
-
+        sql_dir = Path(__file__).resolve().parent / "sql"
+        cursor.execute((sql_dir / "04_clean.sql").read_text(encoding="utf-8"))
+        cursor.execute((sql_dir / "06_fase4b_schema.sql").read_text(encoding="utf-8"))
 def build_clean_contratos(conn) -> int:
     with conn.cursor() as cursor:
         cursor.execute(
@@ -130,6 +72,27 @@ def build_clean_contratos(conn) -> int:
                 moneda,
                 fecha_inicio,
                 fecha_fin,
+                fuente,
+                tipo_procedimiento,
+                tipo_procedimiento_norm,
+                tipo_procedimiento_estado,
+                ley,
+                institucion,
+                clave_institucion,
+                siglas_de_la_institucion,
+                tipo_de_institucion,
+                clave_ramo,
+                descripcion_ramo,
+                clave_de_la_uc,
+                nombre_de_la_uc,
+                numero_de_procedimiento,
+                caracter_del_procedimiento,
+                articulo_de_excepcion,
+                descripcion_excepcion,
+                fecha_inicio_estado,
+                fecha_inicio_valida,
+                fecha_inicio_futura,
+                fecha_fin_antes_inicio,
                 _source_file,
                 _loaded_at
             )
@@ -148,6 +111,27 @@ def build_clean_contratos(conn) -> int:
                 moneda,
                 fecha_inicio,
                 fecha_fin,
+                fuente,
+                tipo_procedimiento,
+                NULL,
+                NULL,
+                ley,
+                institucion,
+                clave_institucion,
+                siglas_de_la_institucion,
+                tipo_de_institucion,
+                clave_ramo,
+                descripcion_ramo,
+                clave_de_la_uc,
+                nombre_de_la_uc,
+                numero_de_procedimiento,
+                caracter_del_procedimiento,
+                articulo_de_excepcion,
+                descripcion_excepcion,
+                fecha_inicio_estado,
+                false,
+                false,
+                false,
                 _source_file,
                 _loaded_at
             FROM staging.contratos
@@ -155,7 +139,6 @@ def build_clean_contratos(conn) -> int:
             """
         )
         inserted = cursor.rowcount
-    conn.commit()
     return inserted
 
 
@@ -171,7 +154,6 @@ def build_clean_proveedores(conn) -> int:
             """
         )
         inserted = cursor.rowcount
-    conn.commit()
     return inserted
 
 
@@ -186,7 +168,6 @@ def build_clean_69b(conn) -> int:
             """
         )
         inserted = cursor.rowcount
-    conn.commit()
     return inserted
 
 
@@ -261,7 +242,6 @@ def build_coincidencias_69b(conn) -> int:
         with conn.cursor() as cursor:
             cursor.executemany(insert_sql, rows)
         inserted += len(rows)
-    conn.commit()
     return inserted
 
 

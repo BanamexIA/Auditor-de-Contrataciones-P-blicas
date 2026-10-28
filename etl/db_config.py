@@ -39,8 +39,8 @@ def database_settings() -> dict[str, str]:
 
     in_container = Path("/.dockerenv").exists()
     host = setting("DB_HOST", default="localhost")
-    if host == "db" and not in_container:
-        host = "localhost"
+    if not in_container and host in {"db", "localhost"}:
+        host = "127.0.0.1"
 
     port_names = ("DB_PORT", "DB_PORT_HOST") if in_container else ("DB_PORT_HOST", "DB_PORT")
     return {
@@ -72,5 +72,30 @@ def connect_database():
         raise RuntimeError(
             "Database password is not configured. Set DB_PASSWORD or ETL_USER_PASSWORD in .env "
             "or in the process environment."
+        )
+    return psycopg.connect(**settings)
+
+
+def connect_database_admin():
+    dotenv = _read_dotenv(Path(__file__).resolve().parents[1] / ".env")
+    settings = database_settings()
+    settings["user"] = (
+        os.getenv("DB_ADMIN_USER")
+        or dotenv.get("DB_ADMIN_USER")
+        or os.getenv("POSTGRES_USER")
+        or dotenv.get("POSTGRES_USER")
+        or ""
+    )
+    settings["password"] = (
+        os.getenv("DB_ADMIN_PASSWORD")
+        or dotenv.get("DB_ADMIN_PASSWORD")
+        or os.getenv("POSTGRES_PASSWORD")
+        or dotenv.get("POSTGRES_PASSWORD")
+        or ""
+    )
+    if not settings["user"] or not settings["password"]:
+        raise RuntimeError(
+            "Database administrator credentials are not configured. Set DB_ADMIN_USER and "
+            "DB_ADMIN_PASSWORD, or POSTGRES_USER and POSTGRES_PASSWORD in .env."
         )
     return psycopg.connect(**settings)
