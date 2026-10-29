@@ -1,7 +1,22 @@
 [
-  "¿Qué principios y disposiciones generales rigen las contrataciones públicas?",
-  "¿Qué condiciones y justificaciones se exigen para una adjudicación directa?",
-  "¿Qué información debe documentarse para justificar una excepción a la licitación?",
-  "¿Qué obligaciones corresponden al área contratante durante un procedimiento?",
-  "¿Qué reglas se aplican a la investigación de mercado y a la selección del procedimiento?"
+  {
+    "pregunta": "¿Qué principios y disposiciones generales rigen las contrataciones públicas?",
+    "fecha_contrato": "2019-06-15"
+  },
+  {
+    "pregunta": "¿Qué condiciones y justificaciones se exigen para una adjudicación directa?",
+    "fecha_contrato": "2022-03-10"
+  },
+  {
+    "pregunta": "¿Qué información debe documentarse para justificar una excepción a la licitación?",
+    "fecha_contrato": "2024-11-20"
+  },
+  {
+    "pregunta": "¿Qué obligaciones corresponden al área contratante durante un procedimiento?",
+    "fecha_contrato": "2025-03-10"
+  },
+  {
+    "pregunta": "¿Qué reglas se aplican a la investigación de mercado y a la selección del procedimiento?",
+    "fecha_contrato": "2025-06-01"
+  }
 ]

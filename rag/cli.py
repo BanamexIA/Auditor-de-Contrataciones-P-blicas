@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import date
 from pathlib import Path
 
 from etl.db_config import connect_database
@@ -44,7 +45,10 @@ def command_setup() -> None:
 
 
 def command_ingest(jsonl_path: Path, sample: bool) -> None:
-    chunks = read_jsonl_chunks(jsonl_path, require_sample_size=sample)
+    try:
+        chunks = read_jsonl_chunks(jsonl_path, require_sample_size=sample)
+    except ValueError as exc:
+        raise SystemExit(f"Invalid fragment file: {exc}") from exc
     client = build_client()
     vectors, elapsed_ms = client.embed([chunk["contenido"] for chunk in chunks])
     inserted = ingest_chunks(chunks, vectors, client.model)
@@ -61,15 +65,16 @@ def command_ingest(jsonl_path: Path, sample: bool) -> None:
     ))
 
 
-def command_search(query: str, top_k: int) -> None:
+def command_search(query: str, contract_date: date, top_k: int) -> None:
     client = build_client()
     vectors, embedding_ms = client.embed([query])
     with connect_database() as conn:
         check_embedding_configuration(conn, client.model, len(vectors[0]))
-        rows, database_ms = retrieve(conn, vectors[0], top_k)
+        rows, database_ms = retrieve(conn, vectors[0], top_k, contract_date)
     print(json.dumps(
         {
             "query": query,
+            "contract_date": contract_date.isoformat(),
             "embedding_ms": round(embedding_ms, 3),
             "database_ms": round(database_ms, 3),
             "results": rows,
@@ -84,7 +89,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Configure and test pgvector RAG retrieval.")
     commands = parser.add_subparsers(dest="command", required=True)
 
-    commands.add_parser("setup", help="Discover the Ollama embedding dimension and configure pgvector.")
+    commands.add_parser("setup", help="Measure the Ollama embedding dimension and configure pgvector.")
 
     ingest_parser = commands.add_parser("ingest", help="Embed and load JSONL source fragments.")
     ingest_parser.add_argument("--jsonl", type=Path, required=True)
@@ -96,6 +101,12 @@ def main() -> int:
 
     search_parser = commands.add_parser("search", help="Run one cosine-similarity query.")
     search_parser.add_argument("--query", required=True)
+    search_parser.add_argument(
+        "--fecha-contrato",
+        type=date.fromisoformat,
+        required=True,
+        help="Fecha del contrato (YYYY-MM-DD) para filtrar normas vigentes.",
+    )
     search_parser.add_argument("--top-k", type=int, default=3)
 
     benchmark_parser = commands.add_parser("benchmark", help="Run the five-query retrieval check.")
@@ -113,7 +124,7 @@ def main() -> int:
     elif args.command == "ingest":
         command_ingest(args.jsonl, args.sample)
     elif args.command == "search":
-        command_search(args.query, args.top_k)
+        command_search(args.query, args.fecha_contrato, args.top_k)
     elif args.command == "benchmark":
         client = build_client()
         results = run_retrieval_benchmark(client, args.queries, args.output, args.top_k)

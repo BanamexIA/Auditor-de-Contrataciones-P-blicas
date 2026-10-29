@@ -48,6 +48,28 @@ La base persiste en `postgres_data`. Para detener los servicios sin borrar los
 datos, ejecuta `docker compose down`. No borres volúmenes para una
 reinicialización sin confirmar primero que no necesitas los datos almacenados.
 
+## Uso de la base de datos en equipo
+
+Para una prueba temporal, pueden conectarse a la base que ya tiene los datos
+en tu computadora. Así no necesitan volver a descargar los CSV. Sin embargo,
+el `docker-compose.yml` actual publica PostgreSQL solo en `localhost`
+(`127.0.0.1`), por lo que tus compañeros no pueden conectarse desde sus
+equipos con la configuración actual. `git pull` tampoco comparte la base ni
+el volumen Docker.
+
+Para habilitar acceso remoto hace falta configurar intencionalmente la red,
+PostgreSQL y el firewall del equipo anfitrión. Usen una red privada/VPN y
+permitan el acceso solo a los dispositivos o direcciones de los compañeros.
+No abran el puerto 5432 a Internet ni cambien el bind a todas las interfaces
+sin controles de acceso. Cada compañero debe conectarse usando la dirección
+privada/VPN de tu equipo, el puerto y una cuenta PostgreSQL con permisos
+mínimos; no compartas la contraseña de administrador ni el archivo `.env`.
+
+Para un uso continuo del equipo, es preferible mover la base a un servidor o
+servicio administrado con acceso privado. Si cada integrante usa su propia
+base local, los datos se deben transferir por un respaldo/restauración o
+cargar los CSV una vez en cada instancia.
+
 ## Roles de base de datos
 
 - `etl_user`: puede crear objetos y escribir en `raw`, `staging`, `clean` y
@@ -123,11 +145,40 @@ python -m rag.cli benchmark
 ```
 
 El benchmark genera `rag/results/embedding_retrieval.csv`, que no se versiona.
-Revisa manualmente la relevancia y la correspondencia de las citas, y registra
-el resultado en [docs/comparativa_modelos.md](docs/comparativa_modelos.md).
+La muestra actual contiene seis fragmentos de ambas versiones. El CSV conserva
+versión, vigencia, hash, PDF local y cita por artículo/página; la revisión de
+relevancia está registrada en [docs/comparativa_modelos.md](docs/comparativa_modelos.md).
 La configuración local para el cliente de embeddings está en
 `OLLAMA_EMBED_BASE_URL` y `OLLAMA_EMBEDDING_MODEL` dentro de `.env`; el valor
-predeterminado de la URL es `http://localhost:11435`.
+predeterminado de la URL es `http://localhost:11434`.
+
+## Fase 6: clientes LLM
+
+El paquete `llm` proporciona una interfaz `generate(system, prompt,
+temperature=0.0)` común a Ollama y un proveedor cloud compatible con la API de
+Chat Completions de OpenAI. Ollama lee `AGENT_BASE_URL` y `AGENT_MODEL`; en
+Docker, la URL predeterminada es `http://host.docker.internal:11434`. Configura
+la URL con el nombre o dirección Tailscale del equipo en despliegue. El cliente
+devuelve texto, conteos de tokens reportados por el proveedor y latencia medida
+de extremo a extremo.
+
+El cliente cloud solo sirve como referencia de benchmark: no se invoca desde el
+cliente Ollama ni es un fallback automático. Para activarlo, configura en `.env`
+un modelo habilitado para tu cuenta y una clave válida:
+
+```dotenv
+CLOUD_BASE_URL=https://api.openai.com/v1/chat/completions
+CLOUD_MODEL=<modelo habilitado>
+CLOUD_API_KEY=<clave privada>
+```
+
+La clave no debe compartirse ni versionarse. Sin clave o modelo configurados,
+`CloudClient` falla con un mensaje explícito. Para ejecutar sus pruebas con
+mocks:
+
+```powershell
+python -m unittest tests.test_llm_clients
+```
 
 ## Etapas de ETL
 
@@ -185,6 +236,12 @@ preguntas y la verificación de comentarios están en
 `scripts/check_fase5_muestreo.sql`, `scripts/consultas_fase5.sql` y
 `scripts/check_comentarios.sql`, respectivamente. Ejecútalas con un cliente
 PostgreSQL que tenga acceso de lectura a la base.
+
+La Fase 5B del RAG tiene instrucciones y formato de muestra en
+[`rag/samples/README.md`](rag/samples/README.md). La ingestión normativa exige
+fuente oficial, metadatos de versión y vigencia, hash SHA-256 del archivo y
+una fecha de contrato para cada búsqueda. No uses fragmentos de ejemplo como
+si fueran texto legal real.
 
 ## Datos públicos
 

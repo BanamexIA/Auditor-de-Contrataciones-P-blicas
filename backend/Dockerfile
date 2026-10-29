@@ -4,9 +4,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 WORKDIR /app
-COPY requirements.txt .
+COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY app.py .
+COPY backend/app.py .
+COPY llm ./llm
 
 EXPOSE 5000
 HEALTHCHECK --interval=10s --timeout=5s --retries=5 --start-period=10s \

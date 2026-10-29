@@ -10,6 +10,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import defaultdict
+from datetime import date
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -211,12 +212,25 @@ def configure_database(model: str, dimension: int, agent_role: str) -> None:
                             embedding vector({}) NOT NULL,
                             metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
                             posicion INTEGER NOT NULL CHECK (posicion >= 0),
+                            ley TEXT,
+                            titulo_jerarquico TEXT,
+                            capitulo TEXT,
+                            articulo TEXT,
                             UNIQUE (documento_id, posicion)
                         )
                         """
                     ).format(sql.Literal(dimension))
                 )
 
+            cursor.execute(
+                """
+                ALTER TABLE rag.chunks
+                    ADD COLUMN IF NOT EXISTS ley TEXT,
+                    ADD COLUMN IF NOT EXISTS titulo_jerarquico TEXT,
+                    ADD COLUMN IF NOT EXISTS capitulo TEXT,
+                    ADD COLUMN IF NOT EXISTS articulo TEXT
+                """
+            )
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_chunks_embedding_cosine "
                 "ON rag.chunks USING hnsw (embedding vector_cosine_ops)"
@@ -252,46 +266,53 @@ def configure_database(model: str, dimension: int, agent_role: str) -> None:
                     sql.Literal(f"Vector de dimensión {dimension} generado por el modelo {model}.")
                 )
             )
+            for column, comment in (
+                ("ley", "Ley a la que pertenece el fragmento, cuando es normativo."),
+                ("titulo_jerarquico", "Título de la estructura legal al que pertenece el fragmento, cuando aplica."),
+                ("capitulo", "Capítulo de la estructura legal al que pertenece el fragmento, cuando aplica."),
+                ("articulo", "Artículo al que pertenece el fragmento, cuando aplica."),
+            ):
+                cursor.execute(
+                    sql.SQL("COMMENT ON COLUMN rag.chunks.{} IS {}").format(
+                        sql.Identifier(column), sql.Literal(comment)
+                    )
+                )
 
 
 def read_jsonl_chunks(path: Path, require_sample_size: bool = False) -> list[dict[str, Any]]:
     chunks: list[dict[str, Any]] = []
     positions: set[tuple[str, str, str, int]] = set()
-    with path.open(encoding="utf-8") as source:
-        for line_number, raw_line in enumerate(source, start=1):
-            if not raw_line.strip():
-                continue
-            try:
-                item = json.loads(raw_line)
-            except json.JSONDecodeError as exc:
-                raise ValueError(f"{path}:{line_number}: invalid JSON: {exc.msg}") from exc
-            if not isinstance(item, dict):
-                raise ValueError(f"{path}:{line_number}: each line must be a JSON object.")
+    records = _read_json_records(path)
+    for item, line_number in records:
+        if not isinstance(item, dict):
+            raise ValueError(f"{path}:{line_number}: each record must be a JSON object.")
 
-            required = ("fuente", "tipo", "titulo", "url_o_ruta", "contenido", "posicion")
-            missing = [key for key in required if key not in item]
-            if missing:
-                raise ValueError(f"{path}:{line_number}: missing fields: {', '.join(missing)}.")
-            if item["tipo"] not in {"docs", "normas", "enterprise"}:
-                raise ValueError(f"{path}:{line_number}: tipo must be docs, normas, or enterprise.")
-            for key in ("fuente", "titulo", "url_o_ruta", "contenido"):
-                if not isinstance(item[key], str) or not item[key].strip():
-                    raise ValueError(f"{path}:{line_number}: {key} must be a non-empty string.")
-            if not isinstance(item["posicion"], int) or isinstance(item["posicion"], bool) or item["posicion"] < 0:
-                raise ValueError(f"{path}:{line_number}: posicion must be a non-negative integer.")
-            metadata = item.get("metadata", {})
-            document_metadata = item.get("document_metadata", {})
-            if not isinstance(metadata, dict) or not isinstance(document_metadata, dict):
-                raise ValueError(f"{path}:{line_number}: metadata fields must be JSON objects.")
+        required = ("fuente", "tipo", "titulo", "url_o_ruta", "contenido", "posicion")
+        missing = [key for key in required if key not in item]
+        if missing:
+            raise ValueError(f"{path}:{line_number}: missing fields: {', '.join(missing)}.")
+        if item["tipo"] not in {"docs", "normas", "enterprise"}:
+            raise ValueError(f"{path}:{line_number}: tipo must be docs, normas, or enterprise.")
+        for key in ("fuente", "titulo", "url_o_ruta", "contenido"):
+            if not isinstance(item[key], str) or not item[key].strip():
+                raise ValueError(f"{path}:{line_number}: {key} must be a non-empty string.")
+        if not isinstance(item["posicion"], int) or isinstance(item["posicion"], bool) or item["posicion"] < 0:
+            raise ValueError(f"{path}:{line_number}: posicion must be a non-negative integer.")
+        metadata = item.get("metadata", {})
+        document_metadata = item.get("document_metadata", {})
+        if not isinstance(metadata, dict) or not isinstance(document_metadata, dict):
+            raise ValueError(f"{path}:{line_number}: metadata fields must be JSON objects.")
+        if require_sample_size:
+            _validate_normative_metadata(item, path, line_number)
 
-            key = (item["tipo"], item["fuente"], item["url_o_ruta"], item["posicion"])
-            if key in positions:
-                raise ValueError(
-                    f"{path}:{line_number}: duplicate document and chunk position {item['posicion']}."
-                )
-            positions.add(key)
-            item["_line_number"] = line_number
-            chunks.append(item)
+        key = (item["tipo"], item["fuente"], item["url_o_ruta"], item["posicion"])
+        if key in positions:
+            raise ValueError(
+                f"{path}:{line_number}: duplicate document and chunk position {item['posicion']}."
+            )
+        positions.add(key)
+        item["_line_number"] = line_number
+        chunks.append(item)
 
     if not chunks:
         raise ValueError(f"{path} contains no chunks.")
@@ -303,7 +324,110 @@ def read_jsonl_chunks(path: Path, require_sample_size: bool = False) -> list[dic
             )
         if any(item["tipo"] != "normas" for item in chunks):
             raise ValueError("The phase 5B sample must contain only tipo='normas' fragments.")
+        versions = {item["document_metadata"]["version"] for item in chunks}
+        if len(versions) < 2:
+            raise ValueError("The phase 5B sample must cover current and abrogated law versions.")
+        if not any(item["document_metadata"].get("fecha_abrogacion") for item in chunks):
+            raise ValueError("The phase 5B sample must include an abrogated law version.")
+        if not any(item["document_metadata"].get("fecha_abrogacion") is None for item in chunks):
+            raise ValueError("The phase 5B sample must include a version without a known abrogation date.")
     return chunks
+
+
+def _read_json_records(path: Path) -> list[tuple[Any, int]]:
+    text = path.read_text(encoding="utf-8")
+    stripped = text.lstrip()
+    if not stripped:
+        return []
+
+    def decode_error(exc: json.JSONDecodeError) -> ValueError:
+        return ValueError(
+            f"{path}:{exc.lineno}:{exc.colno}: invalid JSON ({exc.msg}). "
+            "Use one complete JSON object per line, or a valid JSON object/array; "
+            "remove trailing commas and balance all braces."
+        )
+
+    if stripped.startswith("["):
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise decode_error(exc) from exc
+        if not isinstance(data, list):
+            raise ValueError(f"{path}: top-level JSON value must be an object or array.")
+        return [(item, 1) for item in data]
+
+    decoder = json.JSONDecoder()
+    records: list[tuple[Any, int]] = []
+    offset = 0
+    while offset < len(text):
+        while offset < len(text) and text[offset].isspace():
+            offset += 1
+        if offset == len(text):
+            break
+        line_number = text.count("\n", 0, offset) + 1
+        try:
+            item, offset = decoder.raw_decode(text, offset)
+        except json.JSONDecodeError as exc:
+            raise decode_error(exc) from exc
+        records.append((item, line_number))
+    return records
+
+
+def _validate_normative_metadata(
+    item: dict[str, Any],
+    path: Path,
+    line_number: int,
+) -> None:
+    document = item["document_metadata"]
+    required = (
+        "ley",
+        "version",
+        "fecha_publicacion_dof",
+        "fecha_entrada_vigor",
+        "sha256",
+    )
+    missing = [key for key in required if not document.get(key)]
+    if missing:
+        raise ValueError(
+            f"{path}:{line_number}: missing normative document metadata: {', '.join(missing)}."
+        )
+    abrogation_value = document.get("fecha_abrogacion")
+    if not isinstance(abrogation_value, (str, type(None))):
+        raise ValueError(f"{path}:{line_number}: fecha_abrogacion must be an ISO date or null.")
+    try:
+        publication_date = date.fromisoformat(document["fecha_publicacion_dof"])
+        effective_date = date.fromisoformat(document["fecha_entrada_vigor"])
+        abrogation_date = date.fromisoformat(abrogation_value) if abrogation_value else None
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"{path}:{line_number}: normative dates must use YYYY-MM-DD."
+        ) from exc
+    if publication_date > effective_date:
+        raise ValueError(
+            f"{path}:{line_number}: fecha_publicacion_dof cannot follow fecha_entrada_vigor."
+        )
+    if abrogation_date is not None and abrogation_date <= effective_date:
+        raise ValueError(
+            f"{path}:{line_number}: fecha_abrogacion must be exclusive and after fecha_entrada_vigor."
+        )
+    if not isinstance(document["sha256"], str) or not re.fullmatch(
+        r"[0-9a-f]{64}", document["sha256"]
+    ):
+        raise ValueError(f"{path}:{line_number}: sha256 must be 64 lowercase hexadecimal characters.")
+    parsed_url = urllib.parse.urlsplit(item["url_o_ruta"])
+    if parsed_url.scheme != "https" or parsed_url.hostname not in {
+        "www.diputados.gob.mx",
+        "diputados.gob.mx",
+        "www.dof.gob.mx",
+        "dof.gob.mx",
+    }:
+        raise ValueError(
+            f"{path}:{line_number}: normative sample URL must come from Cámara de Diputados or DOF."
+        )
+    if not any(item["metadata"].get(key) for key in ("articulo", "ruta_normativa")):
+        raise ValueError(
+            f"{path}:{line_number}: normative chunks need an article or ruta_normativa citation."
+        )
 
 
 def ingest_chunks(
@@ -351,10 +475,20 @@ def ingest_chunks(
                     )
                 cursor.execute(
                     """
-                    INSERT INTO rag.documentos (fuente, tipo, titulo, url_o_ruta, metadata)
-                    VALUES (%s, %s, %s, %s, %s::jsonb)
+                    INSERT INTO rag.documentos (
+                        fuente, tipo, titulo, url_o_ruta, ley, version,
+                        fecha_publicacion_dof, fecha_entrada_vigor, fecha_abrogacion,
+                        sha256, metadata
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
                     ON CONFLICT (tipo, fuente, url_o_ruta) DO UPDATE
                     SET titulo = EXCLUDED.titulo,
+                        ley = EXCLUDED.ley,
+                        version = EXCLUDED.version,
+                        fecha_publicacion_dof = EXCLUDED.fecha_publicacion_dof,
+                        fecha_entrada_vigor = EXCLUDED.fecha_entrada_vigor,
+                        fecha_abrogacion = EXCLUDED.fecha_abrogacion,
+                        sha256 = EXCLUDED.sha256,
                         metadata = EXCLUDED.metadata
                     RETURNING id
                     """,
@@ -363,6 +497,12 @@ def ingest_chunks(
                         tipo,
                         first["titulo"],
                         url_o_ruta,
+                        document_metadata.get("ley"),
+                        document_metadata.get("version"),
+                        document_metadata.get("fecha_publicacion_dof"),
+                        document_metadata.get("fecha_entrada_vigor"),
+                        document_metadata.get("fecha_abrogacion"),
+                        document_metadata.get("sha256"),
                         json.dumps(document_metadata, ensure_ascii=False),
                     ),
                 )
@@ -382,13 +522,18 @@ def ingest_chunks(
                         format_vector(vector),
                         json.dumps(chunk.get("metadata", {}), ensure_ascii=False),
                         chunk["posicion"],
+                        chunk.get("metadata", {}).get("ley"),
+                        chunk.get("metadata", {}).get("titulo_jerarquico"),
+                        chunk.get("metadata", {}).get("capitulo"),
+                        chunk.get("metadata", {}).get("articulo"),
                     )
                 )
             cursor.executemany(
                 """
                 INSERT INTO rag.chunks
-                    (documento_id, contenido, embedding, metadata, posicion)
-                VALUES (%s, %s, %s::vector, %s::jsonb, %s)
+                    (documento_id, contenido, embedding, metadata, posicion,
+                     ley, titulo_jerarquico, capitulo, articulo)
+                VALUES (%s, %s, %s::vector, %s::jsonb, %s, %s, %s, %s, %s)
                 """,
                 rows,
             )
@@ -408,7 +553,12 @@ def check_embedding_configuration(conn, model: str, dimension: int) -> None:
         )
 
 
-def retrieve(conn, vector: Sequence[float], top_k: int) -> tuple[list[dict[str, Any]], float]:
+def retrieve(
+    conn,
+    vector: Sequence[float],
+    top_k: int,
+    contract_date: date | None = None,
+) -> tuple[list[dict[str, Any]], float]:
     if top_k < 1:
         raise ValueError("top_k must be at least 1.")
     vector_text = format_vector(vector)
@@ -416,15 +566,27 @@ def retrieve(conn, vector: Sequence[float], top_k: int) -> tuple[list[dict[str, 
     with conn.cursor() as cursor:
         cursor.execute(
             """
-            SELECT c.id, d.titulo, d.fuente, d.tipo, d.url_o_ruta,
+            SELECT c.id, d.titulo, d.fuente, d.tipo, d.ley, d.version,
+                   d.fecha_publicacion_dof, d.fecha_entrada_vigor,
+                   d.fecha_abrogacion, d.sha256, d.url_o_ruta,
+                   d.metadata AS document_metadata,
                    c.posicion, c.contenido, c.metadata,
                    c.embedding <=> %s::vector AS distancia_coseno
             FROM rag.chunks AS c
             JOIN rag.documentos AS d ON d.id = c.documento_id
+            WHERE d.tipo <> 'normas'
+               OR (
+                   %s::date IS NOT NULL
+                   AND d.fecha_entrada_vigor <= %s::date
+                   AND (
+                       d.fecha_abrogacion IS NULL
+                       OR %s::date < d.fecha_abrogacion
+                   )
+               )
             ORDER BY c.embedding <=> %s::vector
             LIMIT %s
             """,
-            (vector_text, vector_text, top_k),
+            (vector_text, contract_date, contract_date, contract_date, vector_text, top_k),
         )
         columns = [description.name for description in cursor.description]
         rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
@@ -442,11 +604,27 @@ def run_retrieval_benchmark(
     if (
         not isinstance(queries_data, list)
         or len(queries_data) != 5
-        or any(not isinstance(query, str) or not query.strip() for query in queries_data)
+        or any(
+            not isinstance(query, dict)
+            or not isinstance(query.get("pregunta"), str)
+            or not query["pregunta"].strip()
+            or not isinstance(query.get("fecha_contrato"), str)
+            for query in queries_data
+        )
     ):
-        raise ValueError(f"{query_path} must be a JSON array containing exactly five query strings.")
+        raise ValueError(
+            f"{query_path} must contain exactly five objects with pregunta and fecha_contrato."
+        )
 
-    embeddings, total_embedding_ms = client.embed(queries_data)
+    queries = [item["pregunta"] for item in queries_data]
+    contract_dates = []
+    for item in queries_data:
+        try:
+            contract_dates.append(date.fromisoformat(item["fecha_contrato"]))
+        except ValueError as exc:
+            raise ValueError("fecha_contrato values must use YYYY-MM-DD.") from exc
+
+    embeddings, total_embedding_ms = client.embed(queries)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     embedding_times = total_embedding_ms / len(queries_data)
     database_times: list[float] = []
@@ -455,12 +633,20 @@ def run_retrieval_benchmark(
         check_embedding_configuration(conn, client.model, len(embeddings[0]))
         fieldnames = [
             "consulta",
+            "fecha_contrato",
             "ranking",
             "chunk_id",
             "titulo",
             "fuente",
             "tipo",
             "url_o_ruta",
+            "version",
+            "fecha_entrada_vigor",
+            "fecha_abrogacion",
+            "sha256",
+            "archivo_local",
+            "articulo",
+            "pagina",
             "posicion",
             "distancia_coseno",
             "embedding_ms_promedio",
@@ -469,19 +655,29 @@ def run_retrieval_benchmark(
         ]
         writer = csv.DictWriter(output, fieldnames=fieldnames)
         writer.writeheader()
-        for query, vector in zip(queries_data, embeddings):
-            rows, database_ms = retrieve(conn, vector, top_k)
+        for query, contract_date, vector in zip(queries, contract_dates, embeddings):
+            rows, database_ms = retrieve(conn, vector, top_k, contract_date)
             database_times.append(database_ms)
             for ranking, row in enumerate(rows, start=1):
+                document_metadata = row["document_metadata"] or {}
+                fragment_metadata = row["metadata"] or {}
                 writer.writerow(
                     {
                         "consulta": query,
+                        "fecha_contrato": contract_date.isoformat(),
                         "ranking": ranking,
                         "chunk_id": row["id"],
                         "titulo": row["titulo"],
                         "fuente": row["fuente"],
                         "tipo": row["tipo"],
                         "url_o_ruta": row["url_o_ruta"],
+                        "version": row["version"],
+                        "fecha_entrada_vigor": row["fecha_entrada_vigor"],
+                        "fecha_abrogacion": row["fecha_abrogacion"],
+                        "sha256": row["sha256"],
+                        "archivo_local": document_metadata.get("archivo_local", ""),
+                        "articulo": fragment_metadata.get("articulo", ""),
+                        "pagina": fragment_metadata.get("pagina", ""),
                         "posicion": row["posicion"],
                         "distancia_coseno": row["distancia_coseno"],
                         "embedding_ms_promedio": round(embedding_times, 3),
@@ -493,7 +689,7 @@ def run_retrieval_benchmark(
 
     mean_db_ms = sum(database_times) / len(database_times) if database_times else 0.0
     return {
-        "queries": float(len(queries_data)),
+        "queries": float(len(queries)),
         "results": float(result_count),
         "embedding_ms_per_query": embedding_times,
         "database_ms_mean": mean_db_ms,

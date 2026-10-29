@@ -9,10 +9,42 @@ CREATE TABLE IF NOT EXISTS rag.documentos (
     tipo TEXT NOT NULL CHECK (tipo IN ('docs', 'normas', 'enterprise')),
     titulo TEXT NOT NULL,
     url_o_ruta TEXT NOT NULL,
+    ley TEXT,
+    version TEXT,
+    fecha_publicacion_dof DATE,
+    fecha_entrada_vigor DATE,
+    fecha_abrogacion DATE,
+    sha256 CHAR(64),
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     fecha_carga TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (sha256 IS NULL OR sha256 ~ '^[0-9a-f]{64}$'),
+    CHECK (
+        fecha_abrogacion IS NULL
+        OR fecha_entrada_vigor IS NULL
+        OR fecha_abrogacion > fecha_entrada_vigor
+    ),
     UNIQUE (tipo, fuente, url_o_ruta)
 );
+
+ALTER TABLE rag.documentos
+    ADD COLUMN IF NOT EXISTS ley TEXT,
+    ADD COLUMN IF NOT EXISTS version TEXT,
+    ADD COLUMN IF NOT EXISTS fecha_publicacion_dof DATE,
+    ADD COLUMN IF NOT EXISTS fecha_entrada_vigor DATE,
+    ADD COLUMN IF NOT EXISTS fecha_abrogacion DATE,
+    ADD COLUMN IF NOT EXISTS sha256 CHAR(64);
+
+DO $$
+BEGIN
+    IF to_regclass('rag.chunks') IS NOT NULL THEN
+        ALTER TABLE rag.chunks
+            ADD COLUMN IF NOT EXISTS ley TEXT,
+            ADD COLUMN IF NOT EXISTS titulo_jerarquico TEXT,
+            ADD COLUMN IF NOT EXISTS capitulo TEXT,
+            ADD COLUMN IF NOT EXISTS articulo TEXT;
+    END IF;
+END
+$$;
 
 CREATE TABLE IF NOT EXISTS rag.embedding_config (
     id SMALLINT PRIMARY KEY CHECK (id = 1),
@@ -23,6 +55,8 @@ CREATE TABLE IF NOT EXISTS rag.embedding_config (
 
 COMMENT ON TABLE rag.documentos IS
 'Metadatos y procedencia de documentos utilizados por la capa RAG.';
+COMMENT ON COLUMN rag.documentos.id IS
+'Identificador técnico del documento en el repositorio RAG.';
 COMMENT ON COLUMN rag.documentos.fuente IS
 'Publicación, institución o conjunto de datos de procedencia del documento.';
 COMMENT ON COLUMN rag.documentos.tipo IS
@@ -31,10 +65,51 @@ COMMENT ON COLUMN rag.documentos.titulo IS
 'Título declarado en la fuente original.';
 COMMENT ON COLUMN rag.documentos.url_o_ruta IS
 'URL pública o ruta local del archivo original.';
+COMMENT ON COLUMN rag.documentos.ley IS
+'Nombre o sigla de la ley asociada al documento normativo.';
+COMMENT ON COLUMN rag.documentos.version IS
+'Versión identificable del texto normativo, según la fuente oficial.';
+COMMENT ON COLUMN rag.documentos.fecha_publicacion_dof IS
+'Fecha de publicación de la versión o decreto correspondiente en el Diario Oficial de la Federación.';
+COMMENT ON COLUMN rag.documentos.fecha_entrada_vigor IS
+'Fecha inclusiva desde la que el documento normativo aplica.';
+COMMENT ON COLUMN rag.documentos.fecha_abrogacion IS
+'Fecha exclusiva desde la que el documento deja de aplicar; NULL si no tiene fecha de abrogación conocida.';
+COMMENT ON COLUMN rag.documentos.sha256 IS
+'SHA-256 hexadecimal del archivo oficial fuente, no del fragmento.';
 COMMENT ON COLUMN rag.documentos.metadata IS
-'Metadatos de procedencia, versión, fecha de publicación y localización del documento.';
+'Metadatos adicionales de procedencia y localización jerárquica del documento.';
 COMMENT ON COLUMN rag.documentos.fecha_carga IS
 'Momento en que se registraron los metadatos del documento en la base de datos.';
+
+DO $$
+BEGIN
+    IF to_regclass('rag.chunks') IS NOT NULL THEN
+        COMMENT ON TABLE rag.chunks IS
+        'Fragmentos documentales con embeddings Ollama; dimension validada contra rag.embedding_config.';
+        COMMENT ON COLUMN rag.chunks.id IS
+        'Identificador técnico del fragmento.';
+        COMMENT ON COLUMN rag.chunks.documento_id IS
+        'Documento fuente al que pertenece el fragmento.';
+        COMMENT ON COLUMN rag.chunks.contenido IS
+        'Texto literal del fragmento de origen.';
+        COMMENT ON COLUMN rag.chunks.embedding IS
+        'Embedding vectorial generado por el modelo documentado en rag.embedding_config.';
+        COMMENT ON COLUMN rag.chunks.metadata IS
+        'Metadatos de localización, artículo y página del fragmento.';
+        COMMENT ON COLUMN rag.chunks.posicion IS
+        'Posición del fragmento dentro del documento de origen.';
+        COMMENT ON COLUMN rag.chunks.ley IS
+        'Ley a la que pertenece el fragmento, cuando es normativo.';
+        COMMENT ON COLUMN rag.chunks.titulo_jerarquico IS
+        'Título de la estructura legal al que pertenece el fragmento, cuando aplica.';
+        COMMENT ON COLUMN rag.chunks.capitulo IS
+        'Capítulo de la estructura legal al que pertenece el fragmento, cuando aplica.';
+        COMMENT ON COLUMN rag.chunks.articulo IS
+        'Artículo al que pertenece el fragmento, cuando aplica.';
+    END IF;
+END
+$$;
 
 COMMENT ON TABLE rag.embedding_config IS
 'Modelo y dimensión descubierta al generar embeddings con la API de Ollama.';
@@ -42,6 +117,10 @@ COMMENT ON COLUMN rag.embedding_config.modelo IS
 'Nombre del modelo Ollama utilizado para los embeddings.';
 COMMENT ON COLUMN rag.embedding_config.dimension IS
 'Dimensión obtenida de la respuesta real del modelo; no se presupone en el código.';
+COMMENT ON COLUMN rag.embedding_config.id IS
+'Identificador fijo de la configuración activa de embeddings.';
+COMMENT ON COLUMN rag.embedding_config.configurado_en IS
+'Momento en que se verificó y guardó la configuración del modelo de embeddings.';
 
 GRANT USAGE, CREATE ON SCHEMA rag TO :"rag_etl_user";
 GRANT SELECT, INSERT, UPDATE, DELETE, REFERENCES
@@ -49,6 +128,20 @@ GRANT SELECT, INSERT, UPDATE, DELETE, REFERENCES
   TO :"rag_etl_user";
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA rag TO :"rag_etl_user";
 GRANT SELECT ON rag.documentos, rag.embedding_config TO :"rag_agent_user";
+
+SELECT format(
+  'GRANT SELECT, INSERT, UPDATE, DELETE, REFERENCES ON rag.chunks TO %I',
+  :'rag_etl_user'
+)
+WHERE to_regclass('rag.chunks') IS NOT NULL
+\gexec
+
+SELECT format(
+  'GRANT SELECT ON rag.chunks TO %I',
+  :'rag_agent_user'
+)
+WHERE to_regclass('rag.chunks') IS NOT NULL
+\gexec
 
 SELECT format(
   'ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA rag GRANT SELECT ON TABLES TO %I',
