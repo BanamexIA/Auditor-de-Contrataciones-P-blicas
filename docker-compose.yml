@@ -55,6 +55,8 @@ services:
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       AGENT_BASE_URL: ${AGENT_BASE_URL:-http://host.docker.internal:11434}
       AGENT_MODEL: ${AGENT_MODEL:-qwen2.5:7b}
+      TELEMETRY_SINK: ${TELEMETRY_SINK:-database}
+      TELEMETRY_AGENT: ${TELEMETRY_AGENT:-backend}
       DB_HOST: ${DB_HOST:-db}
       DB_PORT: ${DB_PORT:-5432}
       DB_NAME: ${DB_NAME:-auditor_contrataciones}

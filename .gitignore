@@ -18,4 +18,6 @@ eval/results/*
 !eval/results/.gitkeep
 rag/results/*
 !rag/results/.gitkeep
+telemetry/results/*
+!telemetry/results/.gitkeep
 docs/reporte_calidad.md

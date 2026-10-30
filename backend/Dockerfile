@@ -8,6 +8,7 @@ COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/app.py .
 COPY llm ./llm
+COPY telemetry ./telemetry
 
 EXPOSE 5000
 HEALTHCHECK --interval=10s --timeout=5s --retries=5 --start-period=10s \

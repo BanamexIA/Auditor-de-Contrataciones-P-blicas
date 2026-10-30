@@ -180,6 +180,44 @@ mocks:
 python -m unittest tests.test_llm_clients
 ```
 
+## Fase 6B: telemetría
+
+Las llamadas `generate()` de ambos clientes quedan instrumentadas. El backend
+guarda tokens, latencia, agente, proveedor/modelo, cuantización y versión de
+Ollama en `telemetry.llm_calls`; no guarda prompts ni respuestas. El tiempo al
+primer token es una estimación a partir de `total_duration` y `eval_duration`
+de Ollama; queda `null` si el proveedor no lo reporta. Para aplicar idempotentemente la tabla a una BD ya
+inicializada:
+
+```powershell
+.\scripts\init_db.ps1
+```
+
+En una laptop, Ollama se ejecuta localmente y no requiere PostgreSQL: el
+decorador guarda CSV local. Desde la raíz, configura el modelo y ejecuta:
+
+```powershell
+$env:AGENT_BASE_URL = "http://localhost:11434"
+$env:AGENT_MODEL = "qwen2.5:7b"
+python agent_host\check_agent.py
+```
+
+El script mide GPU/VRAM durante la generación con `nvidia-smi`; sin GPU NVIDIA
+ambos valores quedan `null`. Para usar otro modelo, indica el nombre exacto de
+`ollama list`. Ver
+[`agent_host/README.md`](agent_host/README.md) para detalles. Las filas del
+backend se pueden exportar a CSV con:
+
+```powershell
+$env:TELEMETRY_SINK = "database"
+python -m telemetry --output telemetry\results\llm_calls_export.csv
+```
+
+Ejecuta ese comando desde el host con los datos de conexión a PostgreSQL de
+`.env` y `TELEMETRY_SINK=database`; para exportar las llamadas locales cambia
+el sink a `csv`. `agent_host\check_agent.py` siempre guarda en CSV y no necesita
+acceso a PostgreSQL.
+
 ## Etapas de ETL
 
 El punto de entrada para staging, reconstrucción de `clean` y transformaciones

@@ -46,7 +46,7 @@ Agente de IA **auditor de contrataciones públicas** (proyecto Banamex, Tec de M
 | 5 | Diccionario de datos | Hecha: siete tablas y 76 columnas verificadas; comentarios, permisos y consultas de ejemplo comprobados |
 | 5B | Esqueleto pgvector | En curso: muestra oficial de seis fragmentos cargada y cinco consultas evaluadas; filtro temporal y citas probados; falta ampliar el corpus y revisión jurídica |
 | 6 | Cliente de modelos | Hecha: interfaz común, cliente Ollama, referencia cloud configurable y pruebas con mocks |
-| 6B | Telemetría | Pendiente |
+| 6B | Telemetría | En curso: decorador de llamadas, persistencia DB/CSV y captura local GPU implementados; pendiente aplicar/verificar migración contra BD |
 | 7 | Benchmark | Pendiente |
 | 8 | Comparativa y decisión | Pendiente |
 | 9 | Diseño de despliegue (documento) | Pendiente |

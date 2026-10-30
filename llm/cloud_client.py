@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from llm.base import LLMClient, LLMResponse, post_json, setting, token_count
+from telemetry.tracking import track_llm_call
 
 
 class CloudClient(LLMClient):
@@ -31,6 +32,7 @@ class CloudClient(LLMClient):
                 "Cloud comparison model is not configured: set CLOUD_MODEL in .env or the process environment."
             )
 
+    @track_llm_call
     def generate(
         self,
         system: str,

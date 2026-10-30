@@ -21,6 +21,12 @@ class LLMResponse:
     input_tokens: int
     output_tokens: int
     latency_ms: float
+    tokens_per_second: float | None = None
+    time_to_first_token_ms: float | None = None
+    model_quantization: str | None = None
+    ollama_version: str | None = None
+    gpu_utilization_percent: float | None = None
+    vram_used_mb: float | None = None
 
 
 class LLMClient(ABC):
@@ -95,3 +101,21 @@ def token_count(value: Any, field: str, provider: str) -> int:
     if not isinstance(value, int) or isinstance(value, bool) or value < 0:
         raise RuntimeError(f"{provider} returned a missing or invalid {field} token count.")
     return value
+
+
+def get_json(url: str) -> dict[str, Any]:
+    request = urllib.request.Request(url, method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            body = response.read()
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"LLM metadata request failed with HTTP {exc.code} at {url}.") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Could not reach LLM endpoint {url}: {exc.reason}.") from exc
+    try:
+        decoded = json.loads(body)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"LLM endpoint {url} returned invalid JSON.") from exc
+    if not isinstance(decoded, dict):
+        raise RuntimeError(f"LLM endpoint {url} returned a JSON value that is not an object.")
+    return decoded

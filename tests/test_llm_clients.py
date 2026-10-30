@@ -22,21 +22,27 @@ class FakeHTTPResponse:
 
 
 class OllamaClientTests(unittest.TestCase):
+    @patch("telemetry.tracking.record_llm_call")
     @patch("llm.base.urllib.request.urlopen")
-    def test_sends_chat_and_returns_usage(self, urlopen):
-        urlopen.return_value = FakeHTTPResponse(
+    def test_sends_chat_and_returns_usage(self, urlopen, _record):
+        urlopen.side_effect = [
+            FakeHTTPResponse({"version": "0.5.7"}),
+            FakeHTTPResponse({"details": {"quantization_level": "Q4_K_M"}}),
+            FakeHTTPResponse(
             {
                 "message": {"content": "respuesta local"},
                 "prompt_eval_count": 12,
                 "eval_count": 4,
                 "total_duration": 500_000_000,
+                "eval_duration": 200_000_000,
             }
-        )
+            ),
+        ]
         client = OllamaClient(base_url="http://ollama.test/", model="local-model")
 
         result = client.generate("Eres auditor.", "Resume la evidencia.", temperature=0.2)
 
-        request = urlopen.call_args.args[0]
+        request = urlopen.call_args_list[-1].args[0]
         self.assertEqual(request.full_url, "http://ollama.test/api/chat")
         self.assertEqual(request.get_method(), "POST")
         payload = json.loads(request.data)
@@ -50,10 +56,19 @@ class OllamaClientTests(unittest.TestCase):
         self.assertEqual((result.text, result.input_tokens, result.output_tokens),
                          ("respuesta local", 12, 4))
         self.assertGreaterEqual(result.latency_ms, 0)
+        self.assertEqual(result.model_quantization, "Q4_K_M")
+        self.assertEqual(result.ollama_version, "0.5.7")
+        self.assertEqual(result.tokens_per_second, 20)
+        self.assertEqual(result.time_to_first_token_ms, 300)
 
+    @patch("telemetry.tracking.record_llm_call")
     @patch("llm.base.urllib.request.urlopen")
-    def test_rejects_missing_token_usage(self, urlopen):
-        urlopen.return_value = FakeHTTPResponse({"message": {"content": "respuesta"}})
+    def test_rejects_missing_token_usage(self, urlopen, _record):
+        urlopen.side_effect = [
+            FakeHTTPResponse({"version": "0.5.7"}),
+            FakeHTTPResponse({"details": {"quantization_level": "Q4_K_M"}}),
+            FakeHTTPResponse({"message": {"content": "respuesta"}}),
+        ]
         client = OllamaClient(base_url="http://ollama.test", model="local-model")
 
         with self.assertRaisesRegex(RuntimeError, "prompt_eval_count"):
@@ -72,8 +87,9 @@ class CloudClientTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "CLOUD_MODEL"):
                 CloudClient()
 
+    @patch("telemetry.tracking.record_llm_call")
     @patch("llm.base.urllib.request.urlopen")
-    def test_sends_openai_compatible_chat_and_returns_usage(self, urlopen):
+    def test_sends_openai_compatible_chat_and_returns_usage(self, urlopen, _record):
         urlopen.return_value = FakeHTTPResponse(
             {
                 "choices": [{"message": {"content": "respuesta de referencia"}}],
