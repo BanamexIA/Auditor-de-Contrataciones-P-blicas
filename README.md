@@ -218,6 +218,60 @@ Ejecuta ese comando desde el host con los datos de conexión a PostgreSQL de
 el sink a `csv`. `agent_host\check_agent.py` siempre guarda en CSV y no necesita
 acceso a PostgreSQL.
 
+## Fase 7: benchmark reproducible
+
+El golden set está en `eval/golden_set.yaml`; contiene 20 preguntas con SQL
+de referencia, notas de cobertura y dificultad. Antes de ejecutar modelos o
+conectar a la base, valida el YAML y que cada SQL pase el analizador:
+
+```powershell
+python -m pip install -r requirements.txt
+python -m eval.run_benchmark --validate-only
+```
+
+Para el benchmark completo, inicia PostgreSQL con las vistas aprobadas
+actualizadas y permisos `SELECT` para `agent_ro`. Ollama debe estar accesible
+desde esta máquina y tener dos modelos locales instalados, idealmente uno de
+7–8B y otro mayor si el hardware lo permite. Configura los nombres exactos,
+el proveedor cloud y sus precios vigentes en `.env`; el runner no inventa
+tarifas:
+
+```dotenv
+BENCHMARK_OLLAMA_MODELS=qwen2.5:7b,qwen2.5:14b
+CLOUD_MODEL=<modelo habilitado>
+CLOUD_API_KEY=<clave privada>
+CLOUD_INPUT_USD_PER_1M_TOKENS=<precio vigente de entrada>
+CLOUD_OUTPUT_USD_PER_1M_TOKENS=<precio vigente de salida>
+```
+
+Después ejecuta desde la raíz:
+
+```powershell
+python -m eval.run_benchmark
+```
+
+El proceso consulta los comentarios de las vistas para construir el contexto,
+calcula primero los resultados de referencia y compara filas/columnas
+normalizadas, no el texto SQL. Solo permite `SELECT` de las dos vistas
+aprobadas, `LIMIT` de 1 a 200, transacción PostgreSQL `READ ONLY` y timeout
+de 60 segundos (las agregaciones sobre el histórico completo pueden exceder
+10 segundos). Repite cada caso tres veces y mide concurrencia 1/2/4/8.
+Las credenciales de la consulta se toman exclusivamente de
+`AGENT_RO_USER`/`AGENT_RO_PASSWORD`; no se usa el usuario ETL para ejecutar
+SQL generado.
+
+Cada corrida crea un subdirectorio ignorado por Git dentro de
+`eval/results/` con `summary.md`, tablas CSV de detalle/resumen/concurrencia,
+metadatos de hardware y resultados de embeddings. El costo cloud queda como
+estimación basada en los precios configurados. La calidad de recuperación RAG
+queda explícitamente “no medida” hasta que
+`rag/test_queries.json` incluya etiquetas `articulos_relevantes` revisadas por
+humanos. Si aún no hay índice RAG disponible, se puede ejecutar
+`python -m eval.run_benchmark --skip-embeddings`; esto no reemplaza la medición
+de embeddings requerida para cerrar la fase. La ejecución completa requiere
+tarifas de entrada y salida configuradas; si faltan, se detiene antes de
+generar llamadas cloud para no presentar un costo inventado.
+
 ## Etapas de ETL
 
 El punto de entrada para staging, reconstrucción de `clean` y transformaciones

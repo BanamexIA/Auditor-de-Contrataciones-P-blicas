@@ -47,7 +47,7 @@ Agente de IA **auditor de contrataciones públicas** (proyecto Banamex, Tec de M
 | 5B | Esqueleto pgvector | En curso: muestra oficial de seis fragmentos cargada y cinco consultas evaluadas; filtro temporal y citas probados; falta ampliar el corpus y revisión jurídica |
 | 6 | Cliente de modelos | Hecha: interfaz común, cliente Ollama, referencia cloud configurable y pruebas con mocks |
 | 6B | Telemetría | En curso: decorador de llamadas, persistencia DB/CSV y captura local GPU implementados; pendiente aplicar/verificar migración contra BD |
-| 7 | Benchmark | Pendiente |
+| 7 | Benchmark | En curso: 20 SQL de referencia y comentarios de vistas verificados con `agent_ro`; retrieval medido en 5 consultas (768 dimensiones; calidad no juzgada por falta de etiquetas humanas). Runner y pruebas listos; falta benchmark text-to-SQL con 2 modelos locales + cloud y concurrencia: Ollama solo tiene `qwen2.5:0.5b` de generación |
 | 8 | Comparativa y decisión | Pendiente |
 | 9 | Diseño de despliegue (documento) | Pendiente |
 

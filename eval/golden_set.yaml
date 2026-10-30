@@ -1,0 +1,250 @@
+- id: q01
+  pregunta: ¿Cuántos contratos históricos iniciaron entre 2019 y 2024 por año?
+  dificultad: facil
+  sql_esperado: |
+    SELECT EXTRACT(YEAR FROM fecha_inicio)::integer AS anio, COUNT(*) AS contratos
+    FROM clean.v_contratos_agente
+    WHERE fuente = 'historico'
+      AND fecha_inicio >= DATE '2019-01-01'
+      AND fecha_inicio < DATE '2025-01-01'
+    GROUP BY EXTRACT(YEAR FROM fecha_inicio)
+    ORDER BY anio
+    LIMIT 20
+  notas: Solo años con registros aparecen; la cobertura de 2023 y 2024 es parcial.
+- id: q02
+  pregunta: ¿Cuántos contratos hay por fuente?
+  dificultad: facil
+  sql_esperado: |
+    SELECT fuente, COUNT(*) AS contratos
+    FROM clean.v_contratos_agente
+    GROUP BY fuente
+    ORDER BY fuente
+    LIMIT 20
+  notas: Conteo por ComprasMX e histórico, sin extrapolar cobertura temporal.
+- id: q03
+  pregunta: ¿Cuántos contratos del histórico iniciaron de 2020 a 2024, por año?
+  dificultad: facil
+  sql_esperado: |
+    SELECT EXTRACT(YEAR FROM fecha_inicio)::integer AS anio, COUNT(*) AS contratos
+    FROM clean.v_contratos_agente
+    WHERE fuente = 'historico'
+      AND fecha_inicio >= DATE '2020-01-01'
+      AND fecha_inicio < DATE '2025-01-01'
+    GROUP BY EXTRACT(YEAR FROM fecha_inicio)
+    ORDER BY anio
+    LIMIT 20
+  notas: Los años finales tienen cobertura parcial.
+- id: q04
+  pregunta: ¿Cuántas adjudicaciones directas hubo por fuente en 2024?
+  dificultad: media
+  sql_esperado: |
+    SELECT fuente, COUNT(*) AS adjudicaciones_directas
+    FROM clean.v_contratos_agente
+    WHERE tipo_procedimiento_norm = 'adjudicacion_directa'
+      AND fecha_inicio >= DATE '2024-01-01'
+      AND fecha_inicio < DATE '2025-01-01'
+    GROUP BY fuente
+    ORDER BY fuente
+    LIMIT 20
+  notas: La clasificación de procedimiento es preliminar y está pendiente de validación.
+- id: q05
+  pregunta: ¿Cuál es la suma del importe registrado para adjudicaciones directas históricas de 2024, separada por moneda?
+  dificultad: media
+  sql_esperado: |
+    SELECT moneda, SUM(importe) AS importe_registrado
+    FROM clean.v_contratos_agente
+    WHERE fuente = 'historico'
+      AND tipo_procedimiento_norm = 'adjudicacion_directa'
+      AND fecha_inicio >= DATE '2024-01-01'
+      AND fecha_inicio < DATE '2025-01-01'
+    GROUP BY moneda
+    ORDER BY moneda
+    LIMIT 20
+  notas: Importe_drc de ComprasMX tiene semántica pendiente; los importes no se convierten ni se suman entre monedas.
+- id: q06
+  pregunta: ¿Cómo se distribuyen los tipos preliminares de procedimiento por fuente?
+  dificultad: media
+  sql_esperado: |
+    SELECT fuente, tipo_procedimiento_norm, COUNT(*) AS contratos
+    FROM clean.v_contratos_agente
+    GROUP BY fuente, tipo_procedimiento_norm
+    ORDER BY fuente, tipo_procedimiento_norm
+    LIMIT 100
+  notas: Los estados pendiente y sin_dato deben interpretarse como categorías no validadas.
+- id: q07
+  pregunta: ¿Cuántos contratos tienen coincidencia exacta de RFC con el listado 69-B, por fuente?
+  dificultad: media
+  sql_esperado: |
+    SELECT c.fuente, COUNT(DISTINCT c.codigo_contrato) AS contratos_con_rfc_exacto
+    FROM clean.v_contratos_agente AS c
+    JOIN clean.v_coincidencias_69b_agente AS m
+      ON m.codigo_contrato = c.codigo_contrato
+    WHERE m.rfc_exacto
+    GROUP BY c.fuente
+    ORDER BY c.fuente
+    LIMIT 20
+  notas: Una coincidencia es una señal para revisión humana, no una determinación de irregularidad.
+- id: q08
+  pregunta: Lista hasta 20 contratos iniciados en 2024 con coincidencia exacta 69-B y que requieren revisión humana.
+  dificultad: dificil
+  sql_esperado: |
+    SELECT c.codigo_contrato, c.fuente, c.fecha_inicio, c.proveedor,
+           m.rfc, m.nombre_del_contribuyente, m.nivel_confianza,
+           m.requiere_revision_humana
+    FROM clean.v_contratos_agente AS c
+    JOIN clean.v_coincidencias_69b_agente AS m
+      ON m.codigo_contrato = c.codigo_contrato
+    WHERE c.fecha_inicio >= DATE '2024-01-01'
+      AND c.fecha_inicio < DATE '2025-01-01'
+      AND m.rfc_exacto
+      AND m.requiere_revision_humana
+    ORDER BY c.fecha_inicio DESC, c.codigo_contrato
+    LIMIT 20
+  notas: Limita datos personales al subconjunto necesario para revisión autorizada.
+- id: q09
+  pregunta: ¿Cuántas coincidencias 69-B hay por nivel de confianza?
+  dificultad: media
+  sql_esperado: |
+    SELECT nivel_confianza, COUNT(*) AS coincidencias
+    FROM clean.v_coincidencias_69b_agente
+    GROUP BY nivel_confianza
+    ORDER BY nivel_confianza
+    LIMIT 20
+  notas: La confianza describe el tipo de coincidencia configurado, no probabilidad de culpabilidad.
+- id: q10
+  pregunta: ¿Cuántos contratos de ComprasMX 2026 hay por institución?
+  dificultad: media
+  sql_esperado: |
+    SELECT institucion, COUNT(*) AS contratos
+    FROM clean.v_contratos_agente
+    WHERE fuente = 'comprasmx'
+      AND fecha_inicio >= DATE '2026-01-01'
+      AND fecha_inicio < DATE '2027-01-01'
+      AND institucion IS NOT NULL
+    GROUP BY institucion
+    ORDER BY contratos DESC, institucion
+    LIMIT 50
+  notas: Institución solo está disponible para ComprasMX; la fecha refiere a inicio del contrato.
+- id: q11
+  pregunta: Muestra contratos ComprasMX con fecha de inicio en 2025 y su unidad compradora.
+  dificultad: media
+  sql_esperado: |
+    SELECT codigo_contrato, institucion, nombre_de_la_uc, fecha_inicio
+    FROM clean.v_contratos_agente
+    WHERE fuente = 'comprasmx'
+      AND fecha_inicio >= DATE '2025-01-01'
+      AND fecha_inicio < DATE '2026-01-01'
+    ORDER BY fecha_inicio, codigo_contrato
+    LIMIT 20
+  notas: El conjunto cargado no tiene cobertura de inicios en 2025; respuesta correcta puede ser conjunto vacío, no inventar registros.
+- id: q12
+  pregunta: Muestra contratos históricos de 2024 con institución o dependencia identificada en la fuente.
+  dificultad: media
+  sql_esperado: |
+    SELECT codigo_contrato, institucion, fecha_inicio
+    FROM clean.v_contratos_agente
+    WHERE fuente = 'historico'
+      AND fecha_inicio >= DATE '2024-01-01'
+      AND fecha_inicio < DATE '2025-01-01'
+      AND institucion IS NOT NULL
+    ORDER BY fecha_inicio, codigo_contrato
+    LIMIT 20
+  notas: La dependencia no existe en el esquema de origen histórico; cero filas significa dato no disponible, no cero contrataciones.
+- id: q13
+  pregunta: ¿Cuántos contratos históricos de 2024 tienen coincidencia exacta de RFC con el listado 69-B?
+  dificultad: dificil
+  sql_esperado: |
+    SELECT COUNT(DISTINCT c.codigo_contrato) AS contratos_con_rfc_exacto
+    FROM clean.v_contratos_agente AS c
+    JOIN clean.v_coincidencias_69b_agente AS m
+      ON m.codigo_contrato = c.codigo_contrato
+    WHERE c.fuente = 'historico'
+      AND c.fecha_inicio >= DATE '2024-01-01'
+      AND c.fecha_inicio < DATE '2025-01-01'
+      AND m.rfc_exacto
+    LIMIT 1
+  notas: El cruce del histórico se interpreta según la vista de coincidencias aprobada y no implica certeza jurídica.
+- id: q14
+  pregunta: Muestra contratos iniciados en 2025 que tengan unidad compradora identificada.
+  dificultad: media
+  sql_esperado: |
+    SELECT codigo_contrato, nombre_de_la_uc, fecha_inicio
+    FROM clean.v_contratos_agente
+    WHERE fecha_inicio >= DATE '2025-01-01'
+      AND fecha_inicio < DATE '2026-01-01'
+      AND nombre_de_la_uc IS NOT NULL
+    ORDER BY fecha_inicio, codigo_contrato
+    LIMIT 20
+  notas: Sin cobertura de inicio en 2025, no inferir que el conteo sea cero para el universo real.
+- id: q15
+  pregunta: ¿Cuántos contratos hay por estado de fecha de inicio y fuente?
+  dificultad: facil
+  sql_esperado: |
+    SELECT fuente, fecha_inicio_estado, COUNT(*) AS contratos
+    FROM clean.v_contratos_agente
+    GROUP BY fuente, fecha_inicio_estado
+    ORDER BY fuente, fecha_inicio_estado
+    LIMIT 30
+  notas: Fechas nulas o no parseables se conservan con estado explícito.
+- id: q16
+  pregunta: Muestra hasta 20 contratos cuya fecha de fin aparece antes de la fecha de inicio.
+  dificultad: media
+  sql_esperado: |
+    SELECT codigo_contrato, fuente, fecha_inicio, fecha_fin
+    FROM clean.v_contratos_agente
+    WHERE fecha_fin_antes_inicio
+    ORDER BY fecha_inicio DESC, codigo_contrato
+    LIMIT 20
+  notas: La bandera es una señal de calidad de datos y requiere verificar la fuente.
+- id: q17
+  pregunta: ¿Cuál es el importe registrado por moneda para contratos históricos iniciados en 2024?
+  dificultad: media
+  sql_esperado: |
+    SELECT moneda, SUM(importe) AS importe_registrado
+    FROM clean.v_contratos_agente
+    WHERE fuente = 'historico'
+      AND fecha_inicio >= DATE '2024-01-01'
+      AND fecha_inicio < DATE '2025-01-01'
+    GROUP BY moneda
+    ORDER BY moneda
+    LIMIT 20
+  notas: No combinar monedas ni interpretar el campo como gasto pagado sin validar su semántica.
+- id: q18
+  pregunta: ¿Qué artículos de excepción aparecen en ComprasMX y cuántos registros hay por artículo?
+  dificultad: media
+  sql_esperado: |
+    SELECT articulo_de_excepcion, COUNT(*) AS contratos
+    FROM clean.v_contratos_agente
+    WHERE fuente = 'comprasmx'
+      AND articulo_de_excepcion IS NOT NULL
+    GROUP BY articulo_de_excepcion
+    ORDER BY contratos DESC, articulo_de_excepcion
+    LIMIT 50
+  notas: El fundamento publicado se reporta como está en la fuente y no se evalúa jurídicamente.
+- id: q19
+  pregunta: ¿Cuántas coincidencias exactas 69-B requieren revisión humana por fuente?
+  dificultad: dificil
+  sql_esperado: |
+    SELECT c.fuente, COUNT(DISTINCT c.codigo_contrato) AS coincidencias_para_revision
+    FROM clean.v_contratos_agente AS c
+    JOIN clean.v_coincidencias_69b_agente AS m
+      ON m.codigo_contrato = c.codigo_contrato
+    WHERE m.rfc_exacto
+      AND m.requiere_revision_humana
+    GROUP BY c.fuente
+    ORDER BY c.fuente
+    LIMIT 20
+  notas: Los casos se presentan para revisión humana, no como hallazgos concluyentes.
+- id: q20
+  pregunta: Muestra contratos con una unidad compradora identificada en el histórico de 2024.
+  dificultad: dificil
+  sql_esperado: |
+    SELECT codigo_contrato, nombre_de_la_uc, fecha_inicio
+    FROM clean.v_contratos_agente
+    WHERE fuente = 'historico'
+      AND fecha_inicio >= DATE '2024-01-01'
+      AND fecha_inicio < DATE '2025-01-01'
+      AND nombre_de_la_uc IS NOT NULL
+    ORDER BY fecha_inicio, codigo_contrato
+    LIMIT 20
+  notas: Unidad compradora solo existe en ComprasMX; una salida vacía significa que el origen histórico no aporta ese campo.

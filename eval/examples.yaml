@@ -1,0 +1,16 @@
+- pregunta: ¿Cuántos contratos históricos hay por etiqueta original de tipo de expediente?
+  sql: |
+    SELECT tipo_expediente, COUNT(*) AS contratos
+    FROM clean.v_contratos_agente
+    WHERE fuente = 'historico'
+      AND tipo_expediente IS NOT NULL
+    GROUP BY tipo_expediente
+    ORDER BY contratos DESC, tipo_expediente
+    LIMIT 50
+- pregunta: ¿Cómo se distribuyen las coincidencias del 69-B según el indicador de nombre normalizado exacto?
+  sql: |
+    SELECT nombre_normalizado_exacto, COUNT(*) AS coincidencias
+    FROM clean.v_coincidencias_69b_agente
+    GROUP BY nombre_normalizado_exacto
+    ORDER BY nombre_normalizado_exacto
+    LIMIT 10
