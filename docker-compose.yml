@@ -23,36 +23,12 @@ services:
       retries: 10
       start_period: 10s
 
-  ollama:
-    profiles: ["local-ollama"] 
-    image: ollama/ollama:latest
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:${OLLAMA_PORT_HOST:-11434}:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    healthcheck:
-      test: ["CMD", "ollama", "ps"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
-    # NVIDIA GPU example (requires the NVIDIA Container Toolkit):
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
-
   backend:
     build:
       context: .
       dockerfile: backend/Dockerfile
     restart: unless-stopped
     environment:
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       AGENT_BASE_URL: ${AGENT_BASE_URL:-http://host.docker.internal:11434}
       AGENT_MODEL: ${AGENT_MODEL:-qwen2.5:7b}
       TELEMETRY_SINK: ${TELEMETRY_SINK:-database}
@@ -78,4 +54,3 @@ services:
 
 volumes:
   postgres_data:
-  ollama_data:

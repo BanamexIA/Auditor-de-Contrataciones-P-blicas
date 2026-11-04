@@ -43,10 +43,24 @@ corrupción o responsabilidad legal.
    instancia ya inicializada, ejecuta `.\scripts\init_db.ps1`. La primera
    inicialización ya habilita pgvector; los scripts deben ser idempotentes
    antes de aplicarlos nuevamente.
+   Para aplicar una sola migración numerada sin repetir transformaciones de
+   datos, indica el archivo exacto, por ejemplo
+   `.\scripts\init_db.ps1 -Only 09_audit.sql`.
 
 La base persiste en `postgres_data`. Para detener los servicios sin borrar los
 datos, ejecuta `docker compose down`. No borres volúmenes para una
 reinicialización sin confirmar primero que no necesitas los datos almacenados.
+
+Ollama no corre en Compose: debe instalarse en la laptop o equipo de inferencia.
+Para verificar la conexión desde el backend hacia Ollama, usa:
+
+```powershell
+docker compose exec backend python -c "import urllib.request,os; print(urllib.request.urlopen(os.environ['AGENT_BASE_URL']+'/api/tags', timeout=5).read()[:200])"
+```
+
+En Windows, el backend usa `AGENT_BASE_URL=http://host.docker.internal:11434`
+por defecto. Sigue [agent_host/README.md](agent_host/README.md) para probar
+Ollama localmente y configurar el acceso por Tailscale de forma restringida.
 
 ## Uso de la base de datos en equipo
 
@@ -79,6 +93,10 @@ cargar los CSV una vez en cada instancia.
   debe usar este rol, no el ORM del backend.
 - El backend mínimo usa `etl_user` para su comprobación de conexión.
 
+El esquema `audit` contiene el DDL inicial de bitácora, reportes y registro de
+agentes. Aún no hay lógica de aplicación que escriba o administre esos
+registros; el script `09_audit.sql` no concede acceso a `agent_ro`.
+
 Los permisos por defecto de lectura para objetos futuros de `clean` y `rag`
 están configurados para objetos creados por `etl_user` o `postgres`. Si se
 crean objetos con otro rol propietario, hay que concederle también esos
@@ -86,33 +104,20 @@ permisos por defecto.
 
 ## Ollama
 
-Ollama conserva modelos en un volumen. Descarga un modelo de forma explícita
-cuando se elija el hardware y modelo para las pruebas. El puerto expuesto por
-el contenedor se configura con `OLLAMA_PORT_HOST` (predeterminado `11435`);
-`OLLAMA_EMBED_BASE_URL` apunta a ese mismo puerto. Si el `.env` existente
-todavía usa `11434` y ya hay otro Ollama ejecutándose localmente, configura
-los tres valores en `.env` antes de iniciar el servicio:
-
-```dotenv
-OLLAMA_PORT_HOST=11435
-OLLAMA_EMBED_BASE_URL=http://localhost:11435
-OLLAMA_BASE_URL=http://host.docker.internal:11435
-```
+Instala Ollama fuera de Docker en la laptop o equipo dedicado. Los modelos se
+descargan y administran desde ese equipo:
 
 ```powershell
-docker compose --profile local-ollama up -d db ollama
-docker compose exec ollama ollama pull qwen2.5:7b
+ollama pull nomic-embed-text
+ollama list
 ```
 
-Si cambiaste los valores después de iniciar el contenedor, recréalo:
-
-```powershell
-docker compose --profile local-ollama up -d --force-recreate ollama
-```
-
-La configuración de GPU NVIDIA está comentada en `docker-compose.yml` y
-requiere instalar NVIDIA Container Toolkit. Sin ella, Ollama puede funcionar
-en CPU, aunque la inferencia será más lenta.
+Configura `AGENT_BASE_URL` para el backend y
+`OLLAMA_EMBED_BASE_URL` para las herramientas locales de embeddings. El
+backend en Docker Desktop llega al Ollama del host por
+`http://host.docker.internal:11434`; los procesos Python ejecutados en la
+laptop usan `http://localhost:11434`. No publiques el puerto de Ollama en
+Internet; para acceso remoto usa Tailscale y el firewall del equipo.
 
 ## Fase 5B: pgvector y recuperación RAG
 
@@ -128,7 +133,7 @@ El flujo de embeddings usa `nomic-embed-text` por defecto. Ollama debe estar
 activo; descarga ese modelo una vez y descubre su dimensión real desde su API:
 
 ```powershell
-docker compose exec ollama ollama pull nomic-embed-text
+ollama pull nomic-embed-text
 python -m rag.cli setup
 ```
 

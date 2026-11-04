@@ -39,7 +39,7 @@ Agente de IA **auditor de contrataciones públicas** (proyecto Banamex, Tec de M
 
 | Fase | Contenido | Estado |
 |---|---|---|
-| 1 | Entorno Docker (db + backend) | Hecha; **ajuste pendiente (Fase 1B)** |
+| 1 | Entorno Docker (db + backend) | Hecha: Fase 1B aplicada; Compose ejecuta solo `db` y `backend`, Ollama se ejecuta en el host, tablas `audit` creadas y verificadas |
 | 2 | Carga a `raw` (3 fuentes) | Hecha |
 | 3 | Reporte de calidad | Hecha (regenerar tras la 4B) |
 | 4 | `staging` y `clean`, cruce con 69-B | Hecha (Fase 4B ejecutada con fecha de descarga 2026-10-16; 2,441,285 contratos, 14,837 filas 69-B y cero rechazos) |
@@ -247,8 +247,11 @@ No presentes conclusiones que los datos no respalden; si la muestra es pequeña,
 
 ## Definición de "avance listo"
 
-- [ ] `docker compose up` levanta solo `db` y `backend` (sin Ollama) con el README.
-- [ ] `agent_host/` con guía y `check_agent.py` funcionando en la laptop.
+- [x] `docker compose up -d --build --remove-orphans` deja solo `db` y `backend` en Compose, sin borrar volúmenes.
+- [x] `agent_host/` con guía Tailscale/firewall y `check_agent.py`.
+- [x] DDL idempotente para `audit.bitacora`, `audit.reportes` y `audit.agentes`.
+- [x] `/health` y `/health/db` devuelven 200 dentro del contenedor y desde Windows; el backend alcanza `/api/tags` en su `AGENT_BASE_URL`.
+- [x] Ollama del host responde a `/api/tags` y `python agent_host/check_agent.py` genera una respuesta y registra telemetría.
 - [x] Las 3 fuentes cargadas en `raw` con conteos verificados.
 - [x] `clean.contratos` con tipo de procedimiento normalizado, columnas de dependencia (ComprasMX), banderas de fecha, tabla de excluidos y `raw = clean + excluidos`.
 - [x] Conteos por tipo normalizado coinciden con los esperados.

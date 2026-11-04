@@ -56,3 +56,4 @@ SELECT format(
 
 \ir /opt/etl/sql/01_vector.sql
 \ir /opt/etl/sql/08_telemetry.sql
+\ir /opt/etl/sql/09_audit.sql
