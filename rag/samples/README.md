@@ -1,7 +1,7 @@
 # Muestra normativa de Fase 5B
 
-`normas.jsonl` contiene seis fragmentos literales de la LAASSP: tres de la
-nueva ley publicada el 16-04-2025 y tres del texto anterior, cuya última
+`normas.jsonl` contiene diez fragmentos literales de la LAASSP: cinco de la
+nueva ley publicada el 16-04-2025 y cinco del texto anterior, cuya última
 reforma fue publicada el 20-05-2021 y que quedó abrogado el 16-04-2025. Cada
 fragmento incluye artículo, página, versión, vigencia y SHA-256 del PDF local.
 
@@ -17,8 +17,10 @@ fragmento incluye artículo, página, versión, vigencia y SHA-256 del PDF local
 La nueva ley y la abrogación de la anterior entran en vigor el 17-04-2025,
 conforme al transitorio del decreto nuevo. La fecha inicial de vigencia de la
 ley anterior se registró como 05-03-2000, sesenta días después de su publicación.
-Revisa el texto y las citas contra el PDF antes de usar los fragmentos como
-criterio legal; la selección de esta muestra no constituye una validación jurídica.
+Los diez fragmentos y sus citas se cotejaron con las páginas indicadas y los
+SHA-256 de los PDF locales. Revisa el texto y las citas antes de usar los
+fragmentos como criterio legal; esta comprobación técnica no constituye una
+validación jurídica profesional.
 
 ## Validar e ingerir
 

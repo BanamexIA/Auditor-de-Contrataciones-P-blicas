@@ -44,12 +44,12 @@ Agente de IA **auditor de contrataciones públicas** (proyecto Banamex, Tec de M
 | 3 | Reporte de calidad | Hecha: reporte raw regenerado tras 4B el 2026-11-04 UTC; 2,441,285 contratos y 14,837 registros 69-B; encabezado informativo 69-B excluido del conteo |
 | 4 | `staging` y `clean`, cruce con 69-B | Hecha (Fase 4B ejecutada con fecha de descarga 2026-10-16; 2,441,285 contratos, 14,837 filas 69-B y cero rechazos) |
 | 5 | Diccionario de datos | Hecha: siete tablas y 76 columnas verificadas; comentarios, permisos y consultas de ejemplo comprobados |
-| 5B | Esqueleto pgvector | En curso: muestra oficial de seis fragmentos cargada y cinco consultas evaluadas; filtro temporal y citas probados; falta ampliar el corpus y revisión jurídica |
+| 5B | Esqueleto pgvector | Hecha técnicamente: muestra oficial de 10 fragmentos (5 por versión), modelo/dimensión 768, índice HNSW, filtro temporal, citas, permisos de `agent_ro` y benchmark manual verificados; revisión jurídica profesional pendiente |
 | 6 | Cliente de modelos | Hecha: interfaz común, cliente Ollama, referencia cloud configurable y pruebas con mocks |
-| 6B | Telemetría | En curso: decorador de llamadas, persistencia DB/CSV y captura local GPU implementados; pendiente aplicar/verificar migración contra BD |
-| 7 | Benchmark | En curso: 20 SQL de referencia y comentarios de vistas verificados con `agent_ro`; retrieval medido en 5 consultas (768 dimensiones; calidad no juzgada por falta de etiquetas humanas). Runner y pruebas listos; falta benchmark text-to-SQL con 2 modelos locales + cloud y concurrencia: Ollama solo tiene `qwen2.5:0.5b` de generación |
-| 8 | Comparativa y decisión | Pendiente |
-| 9 | Diseño de despliegue (documento) | Pendiente |
+| 6B | Telemetría | Hecha: migración aplicada idempotentemente; escritura y exportación DB/CSV verificadas, prueba local Ollama registrada; GPU/VRAM quedan `null` si el host no tiene `nvidia-smi` |
+| 7 | Benchmark | En curso: runner y pruebas listos; la ejecución comparativa text-to-SQL con 2 modelos locales, cloud y concurrencia la realizará un compañero; Ollama disponible en este equipo solo tiene `qwen2.5:0.5b` de generación |
+| 8 | Comparativa y decisión | En curso (preliminar): metodología, decisión arquitectónica local y límites documentados; falta integrar resultados comparables de Fase 7 para elegir modelo y recomendar hardware |
+| 9 | Diseño de despliegue (documento) | Hecha: `docs/despliegue.md` y `ARQUITECTURA.md` describen arquitectura objetivo, sizing basado en medición local, seguridad de red, respaldos/recuperación, S3/IAM, Tailscale, secretos y agentes; despliegue AWS no implementado y parámetros productivos pendientes |
 
 **Baseline previo a la Fase 4B:** `raw.contratos_comprasmx` 84,676 · `raw.compranet_historico` 2,356,609 · `raw.listado_69b` 14,837 · `clean.contratos` 2,432,330 · `clean.proveedores` 298,131 · `clean.listado_69b` 14,837 · `clean.coincidencias_69b` 817. El clean histórico previo omitía 8,955 filas rechazadas por fechas; esos conteos no son el resultado esperado después de aplicar la Fase 4B.
 
@@ -258,10 +258,10 @@ No presentes conclusiones que los datos no respalden; si la muestra es pequeña,
 - [x] 0 columnas, tablas y vistas de `clean` sin comentario; `verify_fase5.py` sin discrepancias.
 - [ ] Rol `agent_ro` de solo lectura verificado (también sobre `rag`).
 - [ ] Esquema `rag` probado con una muestra real de normas y 5 consultas de similitud.
-- [ ] Telemetría de tokens, latencia y GPU/VRAM en la máquina del modelo.
+- [x] Telemetría de tokens, latencia y GPU/VRAM en la máquina del modelo; el host probado no tiene `nvidia-smi`, por lo que GPU/VRAM quedaron `null` como se esperaba.
 - [ ] Benchmark con al menos 3 modelos, pruebas de concurrencia y resultados guardados.
 - [ ] `docs/comparativa_modelos.md` con la justificación de la decisión local y el hardware mínimo.
-- [ ] `docs/despliegue.md` y `ARQUITECTURA.md` actualizados.
+- [x] `docs/despliegue.md` y `ARQUITECTURA.md` actualizados con el diseño objetivo; la infraestructura AWS no está implementada.
 
 ## Cómo empezar
 

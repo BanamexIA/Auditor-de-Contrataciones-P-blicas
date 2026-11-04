@@ -130,3 +130,19 @@ La bitácora guarda en cada paso: solicitud, SQL, fuentes, normas, modelo exacto
 - Ollama sale de Docker y vive en la laptop del auditor, solo para inferencia.
 - Se agregan **S3**, **Tailscale** y la separación nube / local.
 - Se agregan telemetría y el registro de hardware y modelo en la bitácora.
+
+## 10. Diseño de despliegue (Fase 9)
+
+El despliegue AWS descrito es **propuesto y no está implementado**. El entorno
+actual de Docker Compose es local y no equivale a producción. La propuesta
+mantiene la aplicación tras HTTPS/ALB, PostgreSQL en red privada, reportes y
+respaldos en buckets S3 privados con roles IAM separados, y Ollama en los
+equipos de auditoría alcanzables desde el backend mediante ACLs y firewall de
+Tailscale.
+
+El dimensionamiento se debe cerrar con mediciones de carga y crecimiento. La
+BD local observada mide aproximadamente 7.1 GiB, que sirve solo como baseline y
+no como capacidad recomendada. Los RPO/RTO, retención, instancia EC2, EBS,
+conectividad Docker–Tailscale y registro/autenticación de agentes siguen sujetos
+a validación. El detalle de red, respaldos, recuperación, S3, IAM, secretos,
+operación y aceptación está en [docs/despliegue.md](docs/despliegue.md).
