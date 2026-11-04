@@ -41,7 +41,7 @@ Agente de IA **auditor de contrataciones públicas** (proyecto Banamex, Tec de M
 |---|---|---|
 | 1 | Entorno Docker (db + backend) | Hecha: Fase 1B aplicada; Compose ejecuta solo `db` y `backend`, Ollama se ejecuta en el host, tablas `audit` creadas y verificadas |
 | 2 | Carga a `raw` (3 fuentes) | Hecha |
-| 3 | Reporte de calidad | Hecha (regenerar tras la 4B) |
+| 3 | Reporte de calidad | Hecha: reporte raw regenerado tras 4B el 2026-11-04 UTC; 2,441,285 contratos y 14,837 registros 69-B; encabezado informativo 69-B excluido del conteo |
 | 4 | `staging` y `clean`, cruce con 69-B | Hecha (Fase 4B ejecutada con fecha de descarga 2026-10-16; 2,441,285 contratos, 14,837 filas 69-B y cero rechazos) |
 | 5 | Diccionario de datos | Hecha: siete tablas y 76 columnas verificadas; comentarios, permisos y consultas de ejemplo comprobados |
 | 5B | Esqueleto pgvector | En curso: muestra oficial de seis fragmentos cargada y cinco consultas evaluadas; filtro temporal y citas probados; falta ampliar el corpus y revisión jurídica |

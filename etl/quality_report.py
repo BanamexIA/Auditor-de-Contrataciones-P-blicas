@@ -9,7 +9,7 @@ import os
 import re
 import unicodedata
 from collections import Counter, defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from statistics import median
 from typing import Iterable
@@ -410,44 +410,37 @@ def analyze_contracts(file_path: Path) -> dict:
 
 
 def analyze_69b(file_path: Path) -> dict:
-    encoding = detect_best_encoding(file_path)
-    delimiter = detect_delimiter(file_path, encoding)
-    columns: list[str] | None = None
+    rows = iter_csv_rows(file_path)
+    if not rows:
+        return {"columns": [], "rows": 0, "metrics": {}}
+    header = find_header_row(rows, "listado_69b")
+    header_index = next(index for index, row in enumerate(rows) if row == header)
+    columns = [normalize_identifier(cell) for cell in header]
     rows_seen = 0
     missing_counts: dict[str, int] = defaultdict(int)
     seen_values: dict[str, set[str]] = defaultdict(set)
     situation_counter: Counter[str] = Counter()
     rfc_counts: Counter[str] = Counter()
 
-    with file_path.open("r", encoding=encoding, newline="") as handle:
-        reader = csv.reader(handle, delimiter=delimiter)
-        for row in reader:
-            if not row or all(not cell.strip() for cell in row):
-                continue
-            if columns is None:
-                columns = [normalize_identifier(cell) for cell in row]
-                continue
-            rows_seen += 1
-            if len(row) < len(columns):
-                row = row + [""] * (len(columns) - len(row))
-            if len(row) > len(columns):
-                row = row[: len(columns)]
-            record = {columns[idx]: row[idx].strip() for idx in range(len(columns))}
-            for col in columns:
-                value = record.get(col, "")
-                if value == "":
-                    missing_counts[col] += 1
-                else:
-                    seen_values[col].add(value)
-            situacion = record.get("situacion_del_contribuyente", "").strip()
-            if situacion:
-                situation_counter[situacion] += 1
-            rfc = record.get("rfc", "").strip()
-            if rfc:
-                rfc_counts[rfc] += 1
-
-    if columns is None:
-        return {"columns": [], "rows": 0, "metrics": {}}
+    for row in rows[header_index + 1:]:
+        rows_seen += 1
+        if len(row) < len(columns):
+            row = row + [""] * (len(columns) - len(row))
+        if len(row) > len(columns):
+            row = row[: len(columns)]
+        record = {columns[idx]: row[idx].strip() for idx in range(len(columns))}
+        for col in columns:
+            value = record.get(col, "")
+            if value == "":
+                missing_counts[col] += 1
+            else:
+                seen_values[col].add(value)
+        situacion = record.get("situacion_del_contribuyente", "").strip()
+        if situacion:
+            situation_counter[situacion] += 1
+        rfc = record.get("rfc", "").strip()
+        if rfc:
+            rfc_counts[rfc] += 1
 
     metrics = {
         "total_rows": rows_seen,
@@ -502,17 +495,18 @@ def render_quality_report(contract_reports: list[dict], r69_report: dict) -> str
         "Las reglas de `tipo_procedimiento_norm` son preliminares mientras `clean.map_tipo_procedimiento.estado` sea `pendiente`.",
         "Las fechas de inicio vacías o ilegibles se conservan en `clean` con un estado explícito; no se rechazan por sí solas.",
         "Las coincidencias con 69-B son señales para revisión humana, no determinaciones legales.",
+        "Este reporte perfila los CSV originales; los conteos de filas procesadas y excluidas deben verificarse en las capas `staging` y `clean`.",
     ]
 
     report = f"""# Reporte de calidad de datos
 
-Fecha de generación: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}
+Fecha de generación: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}
 
 ## 1. Resumen ejecutivo
 
 - Archivos de contratos analizados: {len(contract_reports)}
 - Total de filas en contratos: {sum(rep.get('rows', 0) for rep in contract_reports)}
-- Archivo 69-B: {r69_report['rows']} filas, {r69_report['columns']} columnas.
+- Archivo 69-B: {r69_report['rows']} filas, {len(r69_report['columns'])} columnas.
 - Los datasets se leen desde `data/raw` y se documentan como fuentes no modificadas.
 - Los conteos de columnas y fechas se presentan por archivo/fuente; su presencia no demuestra que un periodo esté completo.
 
@@ -570,7 +564,15 @@ Fecha de generación: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}
     for item in findings:
         report += f"- {item}\n"
 
-    report += "\nLa cobertura anual de contratos debe contrastarse con el periodo y metadatos de publicación de cada fuente. El plan documenta que 2023 y 2024 son parciales y que no hay datos de 2025; confirme estos puntos frente a los conteos de `clean.v_cobertura_fuentes` tras cada carga.\n"
+    report += """
+## 7. Interpretación y límites
+
+- Los porcentajes de nulos y cardinalidades se calculan sobre cada CSV fuente; no son métricas de completitud del universo de contratación.
+- Los conteos de duplicados identifican claves repetidas, no prueban duplicados contractuales exactos.
+- Los años 2023 y 2024 tienen cobertura parcial; el conjunto revisado no contiene inicios de contrato en 2025. Contrasta cualquier análisis temporal con `clean.v_cobertura_fuentes`.
+- La Fase 4B conserva en `clean` las fechas vacías o no parseables con su estado y mantiene el balance `raw = clean + excluidos`; este informe no sustituye esa verificación en PostgreSQL.
+- La semántica de `importe_drc` de ComprasMX continúa por confirmar; no debe interpretarse como gasto pagado o ejecutado sin evidencia adicional.
+"""
     return report
 
 
