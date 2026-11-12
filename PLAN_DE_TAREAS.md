@@ -56,7 +56,7 @@
 ### Backend (Emiliano)
 | ID | Tarea | Entregable / evidencia | Fecha | Depende de |
 |---|---|---|---|---|
-| B1 | Roles personales de solo lectura en la BD de la EC2, guía de acceso y prueba del túnel desde casa | `docs/acceso_bd.md`; un compañero conectado con su llave | Mié 11 nov | — |
+| B1 | Rol compartido de solo lectura (`agent_ro`) en la BD de la EC2, guía de acceso y prueba del túnel desde fuera de la EC2 (casa o escuela) | `docs/acceso-bd.md`; un compañero conectado con su llave (tabla "Prueba de acceso") | Mié 11 nov | — |
 | B2 | API de casos y estados (crear, transitar, BLOQUEADO con motivo) | Endpoints y pruebas | Vie 13 nov | T1 |
 | B3 | Bitácora: cada paso se registra en `audit.bitacora` (solicitud, SQL, reglas, normas, modelo, equipo, tokens, latencia) | Registros de un caso completo | Lun 16 nov | B2 |
 | B4 | Decisiones humanas sobre las señales (HU-07) | Endpoint y pruebas | Mar 17 nov | B2 |
@@ -120,7 +120,7 @@
 |---|---|---|---|---|
 | Z1 | Probar el túnel SSH desde casa y dar de alta las llaves de los compañeros | Un compañero conectado | Mar 10 nov | — |
 | Z2 | Pruebas de aceptación de la BD: puerto cerrado, conteos iguales a la base local, permisos, versiones, `check_comentarios.sql` y **reinicio de la instancia** | Lista de verificación con resultados | Mié 11 nov | Z1 |
-| Z3 | Documentar el acceso: cómo conectarse, dónde se publica la IP y quién agrega llaves | `docs/acceso_bd.md` | Mié 11 nov | B1 |
+| Z3 | Documentar el acceso: cómo conectarse, dónde se publica la IP y quién agrega llaves | `docs/acceso-bd.md` | Mié 11 nov | B1 |
 | Z4 | **Probar Tailscale desde la EC2 (y desde un contenedor) hacia un Ollama de laptop**; probar un nodo no autorizado | Resultado go / no-go | Vie 13 nov | — |
 | Z5 | Probar S3 en el laboratorio (subir, bajar y URL prefirmada) | Prueba anotada | Vie 13 nov | — |
 | Z6 | **Decidir el alcance del despliegue final:** (a) backend, front y BD en la EC2, o (b) solo la BD en la nube | Decisión en `docs/despliegue_decisiones.md` | Lun 16 nov | Z4, Z5 |
