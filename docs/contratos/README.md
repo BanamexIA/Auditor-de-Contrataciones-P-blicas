@@ -9,7 +9,7 @@ contrato hasta que el equipo lo cambie aquí.
 | 2 | Estado del caso | [estado_caso.md](estado_caso.md) | Aprobado por Backend (11 nov) |
 | 3 | Tools de los agentes | — | Pendiente |
 | 4 | Fragmento y cita normativa | — | Pendiente |
-| 5 | Evento de bitácora | — | Pendiente (la transición de estado se define en el contrato 2) |
+| 5 | Evento de bitácora | [evento_bitacora.md](evento_bitacora.md) | Aprobado por Backend (14 nov) |
 | 6 | API del backend | [api_casos.md](api_casos.md) (casos y estados) | Aprobado por Backend (11 nov) |
 | 7 | Vistas | — | Pendiente (depende de T5 y T6) |
 

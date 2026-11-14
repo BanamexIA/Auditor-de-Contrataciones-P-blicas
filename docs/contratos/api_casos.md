@@ -27,6 +27,17 @@ Orden: el más reciente primero.
 {"casos": [ { "...": "caso" } ]}
 ```
 
+## `GET /casos/<id>/bitacora`: rastro del caso
+
+**200** con los eventos en orden cronológico (formato en
+[evento_bitacora.md](evento_bitacora.md)). **404** si el caso no existe.
+
+```json
+{"eventos": [{"id": 1, "etapa": "recibido", "evento": "solicitud",
+              "detalle": {"texto": "..."}, "modelo": null, "equipo": null,
+              "created_at": "2026-11-14T18:02:11Z"}]}
+```
+
 ## `POST /casos/<id>/transiciones`: cambiar el estado
 
 ```json

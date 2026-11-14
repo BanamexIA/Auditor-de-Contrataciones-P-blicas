@@ -83,6 +83,15 @@ def listar_casos():
     return jsonify(casos=[_caso_json(c) for c in casos])
 
 
+@bp.get("/casos/<caso_id>/bitacora")
+def bitacora_caso(caso_id: str):
+    try:
+        eventos = _repo().listar_eventos(caso_id)
+    except CasoNoEncontrado:
+        return _error(404, "caso_no_encontrado", f"No existe el caso {caso_id}.")
+    return jsonify(eventos=[_caso_json(ev) for ev in eventos])
+
+
 @bp.post("/casos/<caso_id>/transiciones")
 def transitar_caso(caso_id: str):
     datos = _cuerpo()

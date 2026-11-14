@@ -1,4 +1,4 @@
-"""Persistencia de casos en audit.casos, con su evento en audit.bitacora."""
+"""Persistencia de casos (audit.casos) y de su bitácora (audit.bitacora)."""
 
 from __future__ import annotations
 
@@ -6,8 +6,9 @@ import json
 import uuid
 from typing import Any, Protocol
 
-from sqlalchemy import Engine, text
+from sqlalchemy import Connection, Engine, text
 
+from backend.casos.bitacora import SOLICITUD, TRANSICION, validar_evento
 from backend.casos.estados import RECIBIDO, transitar
 
 
@@ -20,18 +21,46 @@ class RepositorioCasos(Protocol):
     def obtener(self, caso_id: str) -> dict[str, Any]: ...
     def listar(self, estado: str | None, limite: int) -> list[dict[str, Any]]: ...
     def transitar(self, caso_id: str, destino: str, motivo: str | None) -> dict[str, Any]: ...
+    def registrar_evento(
+        self,
+        caso_id: str,
+        evento: str,
+        detalle: dict[str, Any],
+        modelo: str | None = None,
+        equipo: str | None = None,
+    ) -> dict[str, Any]: ...
+    def listar_eventos(self, caso_id: str) -> list[dict[str, Any]]: ...
 
 
 _COLUMNAS = (
     "id, solicitud, estado, estado_previo, motivo_bloqueo, creado_por, created_at, updated_at"
 )
+_COLUMNAS_EVENTO = "id, etapa, evento, detalle, modelo, equipo, created_at"
 
-_INSERT_BITACORA = text(
-    """
-    INSERT INTO audit.bitacora (caso_id, etapa, evento, detalle)
-    VALUES (:caso_id, :etapa, 'transicion', CAST(:detalle AS JSONB))
-    """
-)
+
+def _insertar_evento(
+    conn: Connection,
+    caso_id: str,
+    etapa: str,
+    evento: str,
+    detalle: dict[str, Any],
+    modelo: str | None = None,
+    equipo: str | None = None,
+) -> dict[str, Any]:
+    validar_evento(evento, detalle)
+    fila = conn.execute(
+        text(
+            f"""
+            INSERT INTO audit.bitacora (caso_id, etapa, evento, detalle, modelo, equipo)
+            VALUES (:caso_id, :etapa, :evento, CAST(:detalle AS JSONB), :modelo, :equipo)
+            RETURNING {_COLUMNAS_EVENTO}
+            """
+        ),
+        {"caso_id": caso_id, "etapa": etapa, "evento": evento,
+         "detalle": json.dumps(detalle, ensure_ascii=False),
+         "modelo": modelo, "equipo": equipo},
+    ).mappings().one()
+    return dict(fila)
 
 
 class RepositorioCasosSQL:
@@ -54,10 +83,8 @@ class RepositorioCasosSQL:
                 {"id": caso_id, "solicitud": solicitud, "estado": RECIBIDO,
                  "creado_por": creado_por},
             ).mappings().one()
-            conn.execute(_INSERT_BITACORA, {
-                "caso_id": caso_id, "etapa": RECIBIDO,
-                "detalle": json.dumps({"de": None, "a": RECIBIDO}),
-            })
+            _insertar_evento(conn, caso_id, RECIBIDO, SOLICITUD, {"texto": solicitud})
+            _insertar_evento(conn, caso_id, RECIBIDO, TRANSICION, {"de": None, "a": RECIBIDO})
         return dict(fila)
 
     def obtener(self, caso_id: str) -> dict[str, Any]:
@@ -115,8 +142,39 @@ class RepositorioCasosSQL:
                 detalle["motivo"] = nuevo.motivo_bloqueo
             elif actual["motivo_bloqueo"]:
                 detalle["motivo_desbloqueado"] = actual["motivo_bloqueo"]
-            conn.execute(_INSERT_BITACORA, {
-                "caso_id": caso_id, "etapa": actual["estado"],
-                "detalle": json.dumps(detalle, ensure_ascii=False),
-            })
+            _insertar_evento(conn, caso_id, actual["estado"], TRANSICION, detalle)
         return dict(fila)
+
+    def registrar_evento(
+        self,
+        caso_id: str,
+        evento: str,
+        detalle: dict[str, Any],
+        modelo: str | None = None,
+        equipo: str | None = None,
+    ) -> dict[str, Any]:
+        """Agrega un evento; la etapa es el estado actual del caso."""
+        with self.engine.begin() as conn:
+            etapa = conn.execute(
+                text("SELECT estado FROM audit.casos WHERE id = :id"),
+                {"id": caso_id},
+            ).scalar_one_or_none()
+            if etapa is None:
+                raise CasoNoEncontrado(caso_id)
+            return _insertar_evento(conn, caso_id, etapa, evento, detalle, modelo, equipo)
+
+    def listar_eventos(self, caso_id: str) -> list[dict[str, Any]]:
+        with self.engine.connect() as conn:
+            existe = conn.execute(
+                text("SELECT 1 FROM audit.casos WHERE id = :id"), {"id": caso_id}
+            ).scalar_one_or_none()
+            if existe is None:
+                raise CasoNoEncontrado(caso_id)
+            filas = conn.execute(
+                text(
+                    f"SELECT {_COLUMNAS_EVENTO} FROM audit.bitacora "
+                    "WHERE caso_id = :id ORDER BY created_at, id"
+                ),
+                {"id": caso_id},
+            ).mappings().all()
+        return [dict(f) for f in filas]
