@@ -4,7 +4,8 @@
 > número que el sistema puede calcular sobre las vistas aprobadas: grano, base de
 > fechas, exclusiones, métricas y reglas de agregación. No cambia `clean`; se
 > deriva del [diccionario de datos](./diccionario_datos.md) y del ETL. Lo marcado
-> como **POR CONFIRMAR** es una decisión abierta (sección 8).
+> como **POR CONFIRMAR** es una decisión abierta (sección 8). Las cifras de las
+> secciones 2 y 4 se verificaron el 2026-11-12 contra la base de la EC2.
 
 Los resultados son señales para revisión humana, nunca determinaciones de fraude,
 corrupción o responsabilidad legal.
@@ -28,15 +29,31 @@ Este documento lo usan el prompt del Agente Consulta (A1), el golden set
 
 | Fuente | Valor en `fuente` | Filas en `clean` | Cobertura temporal |
 |---|---|---:|---|
-| ComprasMX 2026 | `comprasmx` | 84,676 | Archivo de 2026; rango real de `fecha_inicio` **POR VERIFICAR** |
-| CompraNet histórico | `historico` | 2,356,609 | Inicios válidos desde 2010-01-01, el límite de calidad; 2023 (16,896) y 2024 (1,836) son parciales |
+| ComprasMX 2026 | `comprasmx` | 84,676 | Todas sus fechas de inicio son válidas y caen en 2026 |
+| CompraNet histórico | `historico` | 2,356,609 | Inicios válidos de 2010 a 2024; 2010, 2023 y 2024 son parciales |
 | Listado 69-B del SAT | — | 14,837 | Fecha de publicación no disponible en `clean` |
 
 Fecha de descarga registrada en `clean.config_calidad`: 2026-10-16.
 
+Contratos con fecha de inicio válida por año (M9, verificado el 2026-11-12):
+
+| Año | Fuente | Contratos | | Año | Fuente | Contratos |
+|---|---|---:|---|---|---|---:|
+| 2010 | `historico` | 4,913 | | 2018 | `historico` | 198,330 |
+| 2011 | `historico` | 128,912 | | 2019 | `historico` | 193,997 |
+| 2012 | `historico` | 170,815 | | 2020 | `historico` | 162,405 |
+| 2013 | `historico` | 181,932 | | 2021 | `historico` | 204,035 |
+| 2014 | `historico` | 197,411 | | 2022 | `historico` | 198,510 |
+| 2015 | `historico` | 223,053 | | 2023 | `historico` | 16,896 |
+| 2016 | `historico` | 233,890 | | 2024 | `historico` | 1,836 |
+| 2017 | `historico` | 234,360 | | 2026 | `comprasmx` | 84,676 |
+
+2010 tiene muy pocos registros frente a 2011, y 2023 y 2024 caen de golpe: los
+tres se tratan como años incompletos.
+
 **No hay contratos con inicio en 2025.** Una pregunta sobre un periodo sin
 cobertura se responde "sin datos para ese periodo", nunca con un cero. Una
-pregunta sobre 2023 o 2024 se responde con el aviso de que el año está
+pregunta sobre 2010, 2023 o 2024 se responde con el aviso de que el año está
 incompleto.
 
 **Campos que solo existen en ComprasMX.** En el histórico quedan nulos porque la
@@ -90,8 +107,9 @@ se cumplen `rfc_exacto` y `requiere_revision_humana` al mismo tiempo.
 | `fuera_de_rango` | 7 | No |
 | `no_parseable` | 0 | No |
 
-Conteos del informe del 2026-10-28, que suman los 2,441,285 contratos; el cero de
-`no_parseable` se obtiene por diferencia.
+Conteos verificados el 2026-11-12 con M10; coinciden con el informe del
+2026-10-28 y suman los 2,441,285 contratos. Las fechas nulas y fuera de rango son
+todas del histórico: los 84,676 contratos de ComprasMX tienen fecha válida.
 
 Banderas informativas que no excluyen: `fecha_inicio_futura` (inicio posterior a
 la fecha de descarga) y `fecha_fin_antes_inicio` (fechas invertidas, una señal de
@@ -110,8 +128,8 @@ calidad de datos).
 
 ## 6. Métricas
 
-Todos los SQL de esta sección pasan el validador actual. No se ejecutaron contra
-la base para este borrador.
+Todos los SQL de esta sección pasan el validador actual. M9 y M10 se ejecutaron
+contra la base el 2026-11-12; las demás todavía no.
 
 ### M1. Contratos
 
@@ -311,5 +329,5 @@ usa `ILIKE`, que ignora mayúsculas pero no acentos.
 | 4 | Las coincidencias solo por nombre son `media` en el código y "baja confianza" en el plan de trabajo | Usar la etiqueta de la vista y aclarar que es un cruce por nombre | Agente 2 y backend |
 | 5 | Situación y fecha del 69-B fuera de las vistas | Agregarlas en T6; mientras tanto, no afirmar la situación vigente | Backend |
 | 6 | ¿Se permiten CTE, `UNION`, `RANK()`, `DENSE_RANK()`, `unaccent()` y `v_cobertura_fuentes`? | Mantener el validador estricto | Agente Consulta y backend |
-| 7 | Rango real de `fecha_inicio` en ComprasMX | Verificarlo con M9 | Agente Consulta |
+| 7 | ~~Rango real de `fecha_inicio` en ComprasMX~~ | Resuelta el 2026-11-12: todos sus inicios caen en 2026 (M9) | Agente Consulta |
 | 8 | Los casos q08 y q19 del golden set combinan `rfc_exacto` con `requiere_revision_humana`, que nunca coinciden | Corregirlos antes de medir la exactitud (A4) | Agente Consulta |
