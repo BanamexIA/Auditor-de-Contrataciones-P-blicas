@@ -9,6 +9,9 @@ corrupción o responsabilidad legal.
 - Docker Desktop con Docker Compose v2.
 - Git.
 
+Para compartir la base con el equipo usando AWS Academy, consulta la
+[guía de despliegue de bajo costo](docs/despliegue.md#ruta-recomendada-compartir-la-base-con-aws-academy).
+
 ## Levantar el entorno desde cero
 
 1. Copia `.env.example` a `.env` y configura contraseñas locales únicas:
