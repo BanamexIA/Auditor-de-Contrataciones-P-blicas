@@ -4,10 +4,12 @@ import uuid
 from datetime import datetime, timezone
 
 from backend.casos import estados as e
-from backend.casos.bitacora import DECISION, SOLICITUD, TRANSICION, validar_evento
+from backend.casos.bitacora import (
+    DECISION, REPORTE_GUARDADO, SOLICITUD, TRANSICION, validar_evento,
+)
 from backend.casos.decisiones import CasoCerrado, SenalNoEncontrada, validar_decision
 from backend.casos.estados import transitar
-from backend.casos.repositorio import CasoNoEncontrado
+from backend.casos.repositorio import CasoNoEncontrado, ReporteNoEncontrado
 
 
 class RepositorioEnMemoria:
@@ -16,6 +18,7 @@ class RepositorioEnMemoria:
         self.bitacora = []
         self.senales = {}
         self.decisiones = []
+        self.reportes = []
 
     def _evento(self, caso_id, etapa, evento, detalle, modelo=None, equipo=None):
         validar_evento(evento, detalle)
@@ -126,6 +129,44 @@ class RepositorioEnMemoria:
             "senal_id": senal_id, "decision": decision, "comentario": comentario,
             "anterior": anterior["decision"] if anterior else None})
         return dict(fila)
+
+    def siguiente_version_reporte(self, caso_id):
+        caso = self.casos.get(caso_id)
+        if caso is None:
+            raise CasoNoEncontrado(caso_id)
+        if caso["estado"] == e.CERRADO:
+            raise CasoCerrado(caso_id)
+        return 1 + max((r["version"] for r in self.reportes if r["caso_id"] == caso_id),
+                       default=0)
+
+    def registrar_reporte(self, caso_id, version, uri, sha256, formato, content_type,
+                          tamano_bytes, modelo=None, equipo=None):
+        caso = self.casos[caso_id]
+        if caso["estado"] == e.CERRADO:
+            raise CasoCerrado(caso_id)
+        if any(r["caso_id"] == caso_id and r["version"] == version for r in self.reportes):
+            raise ValueError("version duplicada")
+        fila = {"caso_id": caso_id, "version": version, "uri": uri, "sha256": sha256,
+                "formato": formato, "content_type": content_type,
+                "tamano_bytes": tamano_bytes, "modelo": modelo, "equipo": equipo,
+                "created_at": datetime.now(timezone.utc)}
+        self.reportes.append(fila)
+        self._evento(caso_id, caso["estado"], REPORTE_GUARDADO,
+                     {"ruta": uri, "sha256": sha256, "version": version},
+                     modelo=modelo, equipo=equipo)
+        return {k: v for k, v in fila.items() if k != "caso_id"}
+
+    def listar_reportes(self, caso_id):
+        if caso_id not in self.casos:
+            raise CasoNoEncontrado(caso_id)
+        return [{k: v for k, v in r.items() if k != "caso_id"}
+                for r in self.reportes if r["caso_id"] == caso_id]
+
+    def obtener_reporte(self, caso_id, version):
+        for r in self.reportes:
+            if r["caso_id"] == caso_id and r["version"] == version:
+                return {k: v for k, v in r.items() if k != "caso_id"}
+        raise ReporteNoEncontrado(f"{caso_id} v{version}")
 
     def eventos(self, caso_id, tipo=None):
         return [ev for ev in self.bitacora

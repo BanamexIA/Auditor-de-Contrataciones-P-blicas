@@ -8,12 +8,22 @@ from typing import Any, Protocol
 
 from sqlalchemy import Connection, Engine, text
 
-from backend.casos.bitacora import DECISION, SOLICITUD, TRANSICION, validar_evento
+from backend.casos.bitacora import (
+    DECISION,
+    REPORTE_GUARDADO,
+    SOLICITUD,
+    TRANSICION,
+    validar_evento,
+)
 from backend.casos.decisiones import CasoCerrado, SenalNoEncontrada, validar_decision
 from backend.casos.estados import CERRADO, RECIBIDO, transitar
 
 
 class CasoNoEncontrado(LookupError):
+    pass
+
+
+class ReporteNoEncontrado(LookupError):
     pass
 
 
@@ -49,6 +59,9 @@ _COLUMNAS = (
     "id, solicitud, estado, estado_previo, motivo_bloqueo, creado_por, created_at, updated_at"
 )
 _COLUMNAS_EVENTO = "id, etapa, evento, detalle, modelo, equipo, created_at"
+_COLUMNAS_REPORTE = (
+    "version, uri, sha256, formato, content_type, tamano_bytes, modelo, equipo, created_at"
+)
 
 _CONTAR_SIN_DECISION = text(
     """
@@ -320,4 +333,80 @@ class RepositorioCasosSQL:
                 "senal_id": senal_id, "decision": decision,
                 "comentario": comentario, "anterior": anterior,
             })
+        return dict(fila)
+
+    def siguiente_version_reporte(self, caso_id: str) -> int:
+        with self.engine.connect() as conn:
+            estado = conn.execute(
+                text("SELECT estado FROM audit.casos WHERE id = :id"), {"id": caso_id}
+            ).scalar_one_or_none()
+            if estado is None:
+                raise CasoNoEncontrado(caso_id)
+            if estado == CERRADO:
+                raise CasoCerrado(caso_id)
+            return conn.execute(
+                text("SELECT coalesce(max(version), 0) + 1 FROM audit.reportes "
+                     "WHERE caso_id = :id"),
+                {"id": caso_id},
+            ).scalar_one()
+
+    def registrar_reporte(
+        self,
+        caso_id: str,
+        version: int,
+        uri: str,
+        sha256: str,
+        formato: str,
+        content_type: str,
+        tamano_bytes: int,
+        modelo: str | None = None,
+        equipo: str | None = None,
+    ) -> dict[str, Any]:
+        """Registra un reporte ya guardado en el almacén, con su evento de bitácora."""
+        with self.engine.begin() as conn:
+            etapa = _estado_bloqueando(conn, caso_id)
+            if etapa == CERRADO:
+                raise CasoCerrado(caso_id)
+            fila = conn.execute(
+                text(
+                    f"""
+                    INSERT INTO audit.reportes (caso_id, version, uri, sha256, formato,
+                        content_type, tamano_bytes, modelo, equipo)
+                    VALUES (:caso_id, :version, :uri, :sha256, :formato,
+                        :content_type, :tamano_bytes, :modelo, :equipo)
+                    RETURNING {_COLUMNAS_REPORTE}
+                    """
+                ),
+                {"caso_id": caso_id, "version": version, "uri": uri, "sha256": sha256,
+                 "formato": formato, "content_type": content_type,
+                 "tamano_bytes": tamano_bytes, "modelo": modelo, "equipo": equipo},
+            ).mappings().one()
+            _insertar_evento(conn, caso_id, etapa, REPORTE_GUARDADO,
+                             {"ruta": uri, "sha256": sha256, "version": version},
+                             modelo=modelo, equipo=equipo)
+        return dict(fila)
+
+    def listar_reportes(self, caso_id: str) -> list[dict[str, Any]]:
+        with self.engine.connect() as conn:
+            existe = conn.execute(
+                text("SELECT 1 FROM audit.casos WHERE id = :id"), {"id": caso_id}
+            ).scalar_one_or_none()
+            if existe is None:
+                raise CasoNoEncontrado(caso_id)
+            filas = conn.execute(
+                text(f"SELECT {_COLUMNAS_REPORTE} FROM audit.reportes "
+                     "WHERE caso_id = :id ORDER BY version"),
+                {"id": caso_id},
+            ).mappings().all()
+        return [dict(f) for f in filas]
+
+    def obtener_reporte(self, caso_id: str, version: int) -> dict[str, Any]:
+        with self.engine.connect() as conn:
+            fila = conn.execute(
+                text(f"SELECT {_COLUMNAS_REPORTE} FROM audit.reportes "
+                     "WHERE caso_id = :id AND version = :version"),
+                {"id": caso_id, "version": version},
+            ).mappings().one_or_none()
+        if fila is None:
+            raise ReporteNoEncontrado(f"{caso_id} v{version}")
         return dict(fila)

@@ -5,12 +5,14 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, Response, current_app, jsonify, redirect, request
 from sqlalchemy.exc import OperationalError
 
 from backend.casos.decisiones import CasoCerrado, DecisionInvalida, SenalNoEncontrada
 from backend.casos.estados import ESTADOS, TransicionInvalida
-from backend.casos.repositorio import CasoNoEncontrado, RepositorioCasos
+from backend.casos.repositorio import CasoNoEncontrado, RepositorioCasos, ReporteNoEncontrado
+from backend.reportes.almacen import ArchivoNoEncontrado
+from backend.reportes.servicio import ReporteCorrupto, leer_reporte
 
 LIMITE_DEFECTO = 50
 LIMITE_MAXIMO = 100
@@ -127,6 +129,42 @@ def decidir_senal(caso_id: str, senal_id: str):
     except CasoCerrado:
         return _error(409, "caso_cerrado", "El caso está cerrado; no acepta decisiones.")
     return jsonify(_caso_json(decision)), 201
+
+
+@bp.get("/casos/<caso_id>/reportes")
+def reportes_caso(caso_id: str):
+    try:
+        reportes = _repo().listar_reportes(caso_id)
+    except CasoNoEncontrado:
+        return _error(404, "caso_no_encontrado", f"No existe el caso {caso_id}.")
+    # La uri es interna: el front descarga por /archivo.
+    return jsonify(reportes=[
+        _caso_json({k: v for k, v in r.items() if k != "uri"}) for r in reportes
+    ])
+
+
+@bp.get("/casos/<caso_id>/reportes/<int:version>/archivo")
+def archivo_reporte(caso_id: str, version: int):
+    try:
+        reporte = _repo().obtener_reporte(caso_id, version)
+    except ReporteNoEncontrado:
+        return _error(404, "reporte_no_encontrado",
+                      f"No existe la versión {version} del reporte del caso {caso_id}.")
+    almacen = current_app.extensions["almacen_reportes"]
+    url = almacen.url_descarga(reporte["uri"])
+    if url:
+        return redirect(url, code=302)
+    try:
+        contenido = leer_reporte(almacen, reporte)
+    except (ReporteCorrupto, ArchivoNoEncontrado):
+        current_app.logger.exception("Reporte ilegible: %s", reporte["uri"])
+        return _error(500, "reporte_corrupto",
+                      "El archivo del reporte no coincide con el registrado.")
+    nombre = f"reporte_{caso_id}_v{version}.{reporte['formato']}"
+    return Response(contenido, mimetype=reporte["content_type"], headers={
+        "Content-Disposition": f'inline; filename="{nombre}"',
+        "X-Content-SHA256": reporte["sha256"],
+    })
 
 
 @bp.post("/casos/<caso_id>/transiciones")
