@@ -8,6 +8,7 @@ from typing import Any
 from flask import Blueprint, current_app, jsonify, request
 from sqlalchemy.exc import OperationalError
 
+from backend.casos.decisiones import CasoCerrado, DecisionInvalida, SenalNoEncontrada
 from backend.casos.estados import ESTADOS, TransicionInvalida
 from backend.casos.repositorio import CasoNoEncontrado, RepositorioCasos
 
@@ -90,6 +91,42 @@ def bitacora_caso(caso_id: str):
     except CasoNoEncontrado:
         return _error(404, "caso_no_encontrado", f"No existe el caso {caso_id}.")
     return jsonify(eventos=[_caso_json(ev) for ev in eventos])
+
+
+def _senal_json(senal: dict[str, Any]) -> dict[str, Any]:
+    datos = _caso_json(senal)
+    if senal.get("decision"):
+        datos["decision"] = _caso_json(senal["decision"])
+    return datos
+
+
+@bp.get("/casos/<caso_id>/senales")
+def senales_caso(caso_id: str):
+    try:
+        senales = _repo().listar_senales(caso_id)
+    except CasoNoEncontrado:
+        return _error(404, "caso_no_encontrado", f"No existe el caso {caso_id}.")
+    return jsonify(senales=[_senal_json(s) for s in senales])
+
+
+@bp.post("/casos/<caso_id>/senales/<senal_id>/decision")
+def decidir_senal(caso_id: str, senal_id: str):
+    datos = _cuerpo()
+    if datos is None:
+        return _error(400, "solicitud_invalida", "El cuerpo debe ser un objeto JSON.")
+    try:
+        decision = _repo().decidir(caso_id, senal_id, datos.get("decision"),
+                                   datos.get("comentario"))
+    except DecisionInvalida as exc:
+        return _error(400, "solicitud_invalida", str(exc))
+    except CasoNoEncontrado:
+        return _error(404, "caso_no_encontrado", f"No existe el caso {caso_id}.")
+    except SenalNoEncontrada:
+        return _error(404, "senal_no_encontrada",
+                      f"No existe la señal {senal_id} en el caso {caso_id}.")
+    except CasoCerrado:
+        return _error(409, "caso_cerrado", "El caso está cerrado; no acepta decisiones.")
+    return jsonify(_caso_json(decision)), 201
 
 
 @bp.post("/casos/<caso_id>/transiciones")

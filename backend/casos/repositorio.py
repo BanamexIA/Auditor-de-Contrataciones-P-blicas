@@ -8,8 +8,9 @@ from typing import Any, Protocol
 
 from sqlalchemy import Connection, Engine, text
 
-from backend.casos.bitacora import SOLICITUD, TRANSICION, validar_evento
-from backend.casos.estados import RECIBIDO, transitar
+from backend.casos.bitacora import DECISION, SOLICITUD, TRANSICION, validar_evento
+from backend.casos.decisiones import CasoCerrado, SenalNoEncontrada, validar_decision
+from backend.casos.estados import CERRADO, RECIBIDO, transitar
 
 
 class CasoNoEncontrado(LookupError):
@@ -30,12 +31,52 @@ class RepositorioCasos(Protocol):
         equipo: str | None = None,
     ) -> dict[str, Any]: ...
     def listar_eventos(self, caso_id: str) -> list[dict[str, Any]]: ...
+    def registrar_senales(
+        self, caso_id: str, senales: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]: ...
+    def listar_senales(self, caso_id: str) -> list[dict[str, Any]]: ...
+    def decidir(
+        self,
+        caso_id: str,
+        senal_id: str,
+        decision: str,
+        comentario: str | None,
+        decidido_por: str | None = None,
+    ) -> dict[str, Any]: ...
 
 
 _COLUMNAS = (
     "id, solicitud, estado, estado_previo, motivo_bloqueo, creado_por, created_at, updated_at"
 )
 _COLUMNAS_EVENTO = "id, etapa, evento, detalle, modelo, equipo, created_at"
+
+_CONTAR_SIN_DECISION = text(
+    """
+    SELECT count(*) FROM audit.senales s
+    WHERE s.caso_id = :id
+      AND NOT EXISTS (SELECT 1 FROM audit.decisiones d WHERE d.senal_id = s.id)
+    """
+)
+
+_DECISION_VIGENTE = text(
+    """
+    SELECT decision FROM audit.decisiones
+    WHERE senal_id = :senal_id
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+    """
+)
+
+
+def _estado_bloqueando(conn: Connection, caso_id: str) -> str:
+    """Estado del caso, bloqueando su fila hasta el fin de la transacción."""
+    estado = conn.execute(
+        text("SELECT estado FROM audit.casos WHERE id = :id FOR UPDATE"),
+        {"id": caso_id},
+    ).scalar_one_or_none()
+    if estado is None:
+        raise CasoNoEncontrado(caso_id)
+    return estado
 
 
 def _insertar_evento(
@@ -121,7 +162,11 @@ class RepositorioCasosSQL:
             if actual is None:
                 raise CasoNoEncontrado(caso_id)
 
-            nuevo = transitar(actual["estado"], actual["estado_previo"], destino, motivo)
+            sin_decision = 0
+            if destino == CERRADO:
+                sin_decision = conn.execute(_CONTAR_SIN_DECISION, {"id": caso_id}).scalar_one()
+            nuevo = transitar(actual["estado"], actual["estado_previo"], destino, motivo,
+                              senales_sin_decision=sin_decision)
             fila = conn.execute(
                 text(
                     f"""
@@ -178,3 +223,101 @@ class RepositorioCasosSQL:
                 {"id": caso_id},
             ).mappings().all()
         return [dict(f) for f in filas]
+
+    def registrar_senales(
+        self, caso_id: str, senales: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Guarda las señales de la Tool 1. Cada una necesita ``tipo``; ``datos`` es libre."""
+        with self.engine.begin() as conn:
+            if _estado_bloqueando(conn, caso_id) == CERRADO:
+                raise CasoCerrado(caso_id)
+            guardadas = []
+            for senal in senales:
+                fila = conn.execute(
+                    text(
+                        """
+                        INSERT INTO audit.senales (id, caso_id, tipo, datos)
+                        VALUES (:id, :caso_id, :tipo, CAST(:datos AS JSONB))
+                        RETURNING id, tipo, datos, created_at
+                        """
+                    ),
+                    {"id": str(uuid.uuid4()), "caso_id": caso_id, "tipo": senal["tipo"],
+                     "datos": json.dumps(senal.get("datos", {}), ensure_ascii=False)},
+                ).mappings().one()
+                guardadas.append({**fila, "decision": None})
+        return guardadas
+
+    def listar_senales(self, caso_id: str) -> list[dict[str, Any]]:
+        with self.engine.connect() as conn:
+            existe = conn.execute(
+                text("SELECT 1 FROM audit.casos WHERE id = :id"), {"id": caso_id}
+            ).scalar_one_or_none()
+            if existe is None:
+                raise CasoNoEncontrado(caso_id)
+            filas = conn.execute(
+                text(
+                    """
+                    SELECT s.id, s.tipo, s.datos, s.created_at,
+                           d.decision, d.comentario, d.decidido_por,
+                           d.created_at AS decidido_at
+                    FROM audit.senales s
+                    LEFT JOIN LATERAL (
+                        SELECT decision, comentario, decidido_por, created_at
+                        FROM audit.decisiones
+                        WHERE senal_id = s.id
+                        ORDER BY created_at DESC, id DESC
+                        LIMIT 1
+                    ) d ON TRUE
+                    WHERE s.caso_id = :id
+                    ORDER BY s.created_at, s.id
+                    """
+                ),
+                {"id": caso_id},
+            ).mappings().all()
+        senales = []
+        for f in filas:
+            decision = None
+            if f["decision"] is not None:
+                decision = {"decision": f["decision"], "comentario": f["comentario"],
+                            "decidido_por": f["decidido_por"], "created_at": f["decidido_at"]}
+            senales.append({"id": f["id"], "tipo": f["tipo"], "datos": f["datos"],
+                            "created_at": f["created_at"], "decision": decision})
+        return senales
+
+    def decidir(
+        self,
+        caso_id: str,
+        senal_id: str,
+        decision: str,
+        comentario: str | None,
+        decidido_por: str | None = None,
+    ) -> dict[str, Any]:
+        decision, comentario = validar_decision(decision, comentario)
+        with self.engine.begin() as conn:
+            etapa = _estado_bloqueando(conn, caso_id)
+            if etapa == CERRADO:
+                raise CasoCerrado(caso_id)
+            existe = conn.execute(
+                text("SELECT 1 FROM audit.senales WHERE id = :sid AND caso_id = :id"),
+                {"sid": senal_id, "id": caso_id},
+            ).scalar_one_or_none()
+            if existe is None:
+                raise SenalNoEncontrada(senal_id)
+            anterior = conn.execute(_DECISION_VIGENTE, {"senal_id": senal_id}).scalar_one_or_none()
+            fila = conn.execute(
+                text(
+                    """
+                    INSERT INTO audit.decisiones
+                        (caso_id, senal_id, decision, comentario, decidido_por)
+                    VALUES (:caso_id, :senal_id, :decision, :comentario, :decidido_por)
+                    RETURNING id, senal_id, decision, comentario, decidido_por, created_at
+                    """
+                ),
+                {"caso_id": caso_id, "senal_id": senal_id, "decision": decision,
+                 "comentario": comentario, "decidido_por": decidido_por},
+            ).mappings().one()
+            _insertar_evento(conn, caso_id, etapa, DECISION, {
+                "senal_id": senal_id, "decision": decision,
+                "comentario": comentario, "anterior": anterior,
+            })
+        return dict(fila)

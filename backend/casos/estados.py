@@ -35,12 +35,14 @@ def transitar(
     estado_previo: str | None,
     destino: str,
     motivo: str | None = None,
+    senales_sin_decision: int = 0,
 ) -> Resultado:
     """Valida una transición y devuelve los campos nuevos del caso.
 
     - Avance: solo al siguiente estado del flujo.
     - Bloqueo: desde cualquier estado excepto ``cerrado``, con motivo obligatorio.
     - Desbloqueo: desde ``bloqueado`` solo al estado en que se bloqueó.
+    - Cierre: solo si todas las señales tienen decisión (``senales_sin_decision == 0``).
     """
     if destino not in ESTADOS:
         raise TransicionInvalida(f"Estado desconocido: {destino!r}.")
@@ -69,5 +71,10 @@ def transitar(
         raise TransicionInvalida(
             f"No se puede pasar de {estado_actual!r} a {destino!r}; "
             f"el siguiente estado es {siguiente!r}."
+        )
+    if destino == CERRADO and senales_sin_decision > 0:
+        raise TransicionInvalida(
+            f"No se puede cerrar: faltan decisiones en {senales_sin_decision} "
+            "señal(es). 'pendiente' cuenta como decisión."
         )
     return Resultado(destino, None, None)

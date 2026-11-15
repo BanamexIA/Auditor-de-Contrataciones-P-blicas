@@ -39,7 +39,7 @@ tokens y en cuánto tiempo. Con ella se reconstruye el rastro del caso (HU-06).
 | `reglas_evaluadas` | Termina la Tool 1 | Agente Detección | `reglas`: lista de `{id, version, resultado, valor, umbral}`; `senales`: ids de las señales generadas |
 | `normas_recuperadas` | Termina la Tool 2 | Agente Normativo | `normas`: lista de `{documento, articulo, version, fecha_vigencia, score}` por señal; `sin_soporte`: señales sin norma |
 | `reporte_guardado` | Se guarda el reporte | Agente Reportes | `ruta`, `sha256`, `version` |
-| `decision` | El auditor decide sobre una señal (B4) | Backend | `senal_id`, `decision` (`relevante`/`descartada`/`pendiente`), `comentario` |
+| `decision` | El auditor decide sobre una señal (B4) | Backend | `senal_id`, `decision` (`relevante`/`descartada`/`pendiente`), `comentario`, `anterior` (decisión previa o `null`) |
 | `error` | Fallo que no es de un LLM (BD, validación interna) | Backend | `tipo`, `mensaje` (sin datos sensibles) |
 
 Agregar un tipo nuevo requiere actualizar esta tabla.
