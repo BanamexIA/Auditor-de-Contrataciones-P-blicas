@@ -1,3 +1,4 @@
 Flask==3.1.1
 SQLAlchemy==2.0.41
 psycopg[binary]==3.2.9
+sqlglot==26.16.4
