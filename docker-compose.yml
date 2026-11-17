@@ -38,6 +38,10 @@ services:
       DB_NAME: ${DB_NAME:-auditor_contrataciones}
       DB_USER: ${DB_USER:-etl_user}
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      REPORTES_ALMACEN: ${REPORTES_ALMACEN:-local}
+      REPORTES_DIR: /app/data/reportes
+    volumes:
+      - reportes_data:/app/data/reportes
     ports:
       - "127.0.0.1:${BACKEND_PORT_HOST:-5000}:5000"
     depends_on:
@@ -54,3 +58,4 @@ services:
 
 volumes:
   postgres_data:
+  reportes_data:

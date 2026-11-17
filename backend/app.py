@@ -3,9 +3,11 @@ import os
 from flask import Flask, jsonify
 from sqlalchemy import URL, Engine, create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
+from werkzeug.exceptions import HTTPException
 
 from backend.casos.api import bp as casos_bp
 from backend.casos.repositorio import RepositorioCasos, RepositorioCasosSQL
+from backend.reportes.almacen import AlmacenReportes, almacen_desde_entorno
 
 
 def engine_desde_entorno() -> Engine:
@@ -23,13 +25,17 @@ def engine_desde_entorno() -> Engine:
 def create_app(
     engine: Engine | None = None,
     repositorio: RepositorioCasos | None = None,
+    almacen: AlmacenReportes | None = None,
 ) -> Flask:
     app = Flask(__name__)
     app.json.ensure_ascii = False
+    # Con charset explícito, PowerShell 5.1 no decodifica los acentos como Latin-1.
+    app.json.mimetype = "application/json; charset=utf-8"
     if repositorio is None:
         engine = engine or engine_desde_entorno()
         repositorio = RepositorioCasosSQL(engine)
     app.extensions["repositorio_casos"] = repositorio
+    app.extensions["almacen_reportes"] = almacen or almacen_desde_entorno()
 
     @app.get("/health")
     def health():
@@ -48,7 +54,31 @@ def create_app(
         return jsonify(status="ok", database="connected")
 
     app.register_blueprint(casos_bp)
+    _errores_en_json(app)
     return app
+
+
+_CODIGOS_HTTP = {
+    400: "solicitud_invalida",
+    404: "ruta_no_encontrada",
+    405: "metodo_no_permitido",
+    415: "solicitud_invalida",
+}
+
+
+def _errores_en_json(app: Flask) -> None:
+    """Todos los errores con la forma del contrato: {"error": {"codigo", "mensaje"}}."""
+
+    @app.errorhandler(HTTPException)
+    def error_http(exc: HTTPException):
+        codigo = _CODIGOS_HTTP.get(exc.code or 500, "error_http")
+        return jsonify(error={"codigo": codigo, "mensaje": exc.description}), exc.code
+
+    @app.errorhandler(Exception)
+    def error_interno(exc: Exception):
+        app.logger.exception("Error no controlado")
+        return jsonify(error={"codigo": "error_interno",
+                              "mensaje": "Error interno del servidor."}), 500
 
 
 if __name__ == "__main__":

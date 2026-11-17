@@ -6,6 +6,7 @@
 data/raw/
 data/processed/
 data/interim/
+data/reportes/
 
 # Python
 __pycache__/
