@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from typing import Any, Sequence
 
 from agents.consulta.validator import MAX_SQL_ROWS, validate_sql
 
@@ -98,8 +98,13 @@ Ejemplos:
 """
 
 
-def build_user_prompt(question: str) -> str:
-    return f"Pregunta del auditor: {question.strip()}"
+def build_user_prompt(question: str, clarifications: Sequence[tuple[str, str]] = ()) -> str:
+    parts = [f"Pregunta del auditor: {question.strip()}"]
+    for asked, answer in clarifications:
+        parts.append(f"Aclaración pedida: {asked.strip()}\nRespuesta del auditor: {answer.strip()}")
+    if clarifications:
+        parts.append("Usa estas aclaraciones y no vuelvas a preguntar lo mismo.")
+    return "\n\n".join(parts)
 
 
 def _load_json_object(text: str) -> dict[str, Any]:
