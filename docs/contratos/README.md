@@ -7,7 +7,7 @@ contrato hasta que el equipo lo cambie aquí.
 |---|---|---|---|
 | 1 | Señal de riesgo | — | Pendiente |
 | 2 | Estado del caso | [estado_caso.md](estado_caso.md) | Aprobado por Backend (11 nov) |
-| 3 | Tools de los agentes | — | Pendiente |
+| 3 | Tools de los agentes | [tools_consulta.md](tools_consulta.md) (Agente Consulta) | Agente Consulta: Borrador (16 nov); los demás agentes: Pendiente |
 | 4 | Fragmento y cita normativa | — | Pendiente |
 | 5 | Evento de bitácora | [evento_bitacora.md](evento_bitacora.md) | Aprobado por Backend (14 nov) |
 | 6 | API del backend | [api_casos.md](api_casos.md) (casos y estados), [decisiones.md](decisiones.md) (señales y decisiones, HU-07), [reportes.md](reportes.md) (almacenamiento, B5) | Aprobado por Backend (11 nov) |
