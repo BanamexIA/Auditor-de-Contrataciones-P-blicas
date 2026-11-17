@@ -57,3 +57,7 @@ SELECT format(
 \ir /opt/etl/sql/01_vector.sql
 \ir /opt/etl/sql/08_telemetry.sql
 \ir /opt/etl/sql/09_audit.sql
+\ir /opt/etl/sql/10_audit_casos.sql
+\ir /opt/etl/sql/11_audit_bitacora.sql
+\ir /opt/etl/sql/12_audit_senales.sql
+\ir /opt/etl/sql/13_audit_reportes.sql

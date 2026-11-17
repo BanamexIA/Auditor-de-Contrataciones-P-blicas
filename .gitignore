@@ -6,6 +6,7 @@
 data/raw/
 data/processed/
 data/interim/
+data/reportes/
 
 # Python
 __pycache__/
@@ -21,3 +22,6 @@ rag/results/*
 telemetry/results/*
 !telemetry/results/.gitkeep
 docs/reporte_calidad.md
+
+# Database dumps (contain project data)
+*.dump
