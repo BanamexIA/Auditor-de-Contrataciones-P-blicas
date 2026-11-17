@@ -189,12 +189,18 @@ class ReferenceCasesTests(unittest.TestCase):
 
     def test_naive_sql_is_caught_by_the_coverage_check(self):
         for case in self.cases:
-            if "sql_ingenuo" not in case:
+            sql = case.get("sql_ingenuo") or case.get("sql_esperado")
+            if not sql:
                 continue
             with self.subTest(caso=case["id"]):
-                check = check_coverage(validate_sql(case["sql_ingenuo"]), COVERAGE)
+                check = check_coverage(validate_sql(sql), COVERAGE)
                 expected_no_data = case["tipo_esperado"] == "sin_datos"
                 self.assertEqual(check.sin_datos is not None, expected_no_data, check.sin_datos)
+
+    def test_cases_that_expect_sql_have_the_expected_sql(self):
+        for case in self.cases:
+            with self.subTest(caso=case["id"]):
+                self.assertEqual("sql_esperado" in case, case["tipo_esperado"] == "sql")
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
 # tipo_esperado es la respuesta correcta del Agente Consulta.
 # sql_ingenuo es el SQL que un modelo podría escribir si no detecta el problema;
 # la revisión de cobertura debe convertirlo en "sin_datos" sin ayuda del modelo.
+# sql_esperado es la respuesta correcta de los casos que sí esperan SQL.
 - id: c01
   pregunta: ¿Cuál es la institución que más contrata?
   tipo_esperado: aclaracion
@@ -85,7 +86,7 @@
   pregunta: ¿Cuántos contratos del histórico iniciaron en 2024?
   tipo_esperado: sql
   notas: Hay datos, pero 2024 está incompleto; debe anotarse en supuestos.
-  sql_ingenuo: |
+  sql_esperado: |
     SELECT COUNT(*) AS contratos
     FROM clean.v_contratos_agente
     WHERE fuente = 'historico'
@@ -96,7 +97,7 @@
   pregunta: ¿Cuántas licitaciones públicas registró ComprasMX en 2026?
   tipo_esperado: sql
   notas: Pregunta clara, con datos.
-  sql_ingenuo: |
+  sql_esperado: |
     SELECT COUNT(*) AS licitaciones
     FROM clean.v_contratos_agente
     WHERE fuente = 'comprasmx'

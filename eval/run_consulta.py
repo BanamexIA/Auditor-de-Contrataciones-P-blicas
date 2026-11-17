@@ -5,6 +5,7 @@ Unlike eval/run_benchmark.py, which compares models, this runs the full agent
 to the model, and compares results ignoring column aliases and column order.
 
     python -m eval.run_consulta --repeticiones 3
+    python -m eval.run_consulta --casos eval/casos_consulta.yaml
 """
 from __future__ import annotations
 
@@ -31,6 +32,9 @@ def load_cases(path: Path = GOLDEN_SET_PATH) -> list[dict[str, Any]]:
     cases = yaml.safe_load(path.read_text(encoding="utf-8"))
     for case in cases:
         case.setdefault("tipo_esperado", "sql")
+        case.setdefault("dificultad", "sin_clasificar")
+        if case["tipo_esperado"] == "sql" and not case.get("sql_esperado"):
+            raise ValueError(f"{case['id']}: un caso que espera SQL necesita sql_esperado.")
         if case["tipo_esperado"] not in RESPONSE_TYPES:
             raise ValueError(f"{case['id']}: tipo_esperado no válido: {case['tipo_esperado']!r}.")
     return cases
@@ -128,9 +132,9 @@ def write_report(output_dir: Path, results: list[dict[str, Any]], summary: dict[
         encoding="utf-8",
     )
     lines = [
-        "# Exactitud del Agente Consulta (A4)",
+        "# Medición del Agente Consulta",
         "",
-        f"Modelo: `{metadata['modelo']}` · Casos: {metadata['casos']} · Repeticiones: {metadata['repeticiones']} · Fecha: {metadata['fecha']}",
+        f"Archivo: `{metadata.get('archivo', 'golden_set.yaml')}` · Modelo: `{metadata['modelo']}` · Casos: {metadata['casos']} · Repeticiones: {metadata['repeticiones']} · Fecha: {metadata['fecha']}",
         "",
         "| Indicador | Valor |",
         "|---|---:|",
@@ -149,7 +153,7 @@ def write_report(output_dir: Path, results: list[dict[str, Any]], summary: dict[
     (output_dir / "resumen.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def run(model: str | None, repetitions: int, output_root: Path) -> Path:
+def run(model: str | None, repetitions: int, output_root: Path, cases_path: Path = GOLDEN_SET_PATH) -> Path:
     from agents.consulta.agent import answer_question
     from agents.consulta.coverage import COVERAGE_QUERY, Coverage
     from agents.consulta.prompt import build_system_prompt
@@ -162,7 +166,7 @@ def run(model: str | None, repetitions: int, output_root: Path) -> Path:
     )
     from llm.ollama_client import OllamaClient
 
-    cases = load_cases()
+    cases = load_cases(cases_path)
     client = OllamaClient(base_url=benchmark_ollama_base_url(), model=model)
     system_prompt = build_system_prompt(schema_context(), load_examples(cases))
     with connect_agent_ro() as connection, connection.cursor() as cursor:
@@ -192,13 +196,15 @@ def run(model: str | None, repetitions: int, output_root: Path) -> Path:
 
     summary = summarize(results)
     metadata = {
+        "archivo": cases_path.name,
         "modelo": client.model,
         "casos": len(cases),
         "repeticiones": repetitions,
         "fecha": datetime.now().isoformat(timespec="seconds"),
         "comparacion": "filas normalizadas; ignora alias, orden de columnas y orden de filas",
     }
-    output_dir = output_root / f"consulta_{datetime.now():%Y%m%d_%H%M%S}"
+    prefix = "consulta" if cases_path == GOLDEN_SET_PATH else f"consulta_{cases_path.stem}"
+    output_dir = output_root / f"{prefix}_{datetime.now():%Y%m%d_%H%M%S}"
     write_report(output_dir, results, summary, metadata)
     return output_dir
 
@@ -207,9 +213,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Mide la exactitud del Agente Consulta (A4).")
     parser.add_argument("--modelo", help="Modelo de Ollama; por defecto AGENT_MODEL.")
     parser.add_argument("--repeticiones", type=int, default=1)
+    parser.add_argument("--casos", type=Path, default=GOLDEN_SET_PATH,
+                        help="Archivo YAML de casos; por defecto el golden set.")
     parser.add_argument("--output-dir", type=Path, default=RESULTS_PATH)
     args = parser.parse_args()
-    output_dir = run(args.modelo, args.repeticiones, args.output_dir)
+    output_dir = run(args.modelo, args.repeticiones, args.output_dir, args.casos.resolve())
     print(f"Resultados: {output_dir.resolve()}")
     return 0
 

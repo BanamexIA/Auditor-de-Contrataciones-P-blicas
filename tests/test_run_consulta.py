@@ -39,6 +39,19 @@ class GoldenSetTests(unittest.TestCase):
                 check = check_coverage(validate_sql(case["sql_esperado"]), coverage)
                 self.assertEqual(check.sin_datos is not None, case["tipo_esperado"] == "sin_datos")
 
+    def test_loads_the_a2_cases_too(self):
+        cases = load_cases(Path(__file__).resolve().parents[1] / "eval" / "casos_consulta.yaml")
+        self.assertEqual(len(cases), 13)
+        self.assertTrue(all(case["dificultad"] == "sin_clasificar" for case in cases))
+        self.assertEqual(sum(case["tipo_esperado"] == "aclaracion" for case in cases), 5)
+
+    def test_rejects_a_sql_case_without_expected_sql(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "casos.yaml"
+            path.write_text("- id: x1\n  pregunta: ¿Algo?\n  tipo_esperado: sql\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "sql_esperado"):
+                load_cases(path)
+
     def test_no_case_asks_for_an_impossible_combination(self):
         for case in self.cases:
             sql = case["sql_esperado"]
