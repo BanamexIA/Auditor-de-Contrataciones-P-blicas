@@ -8,6 +8,7 @@ Los umbrales NO están aprobados: el socio formador debe confirmarlos (umbral de
 concentración, montos atípicos y el criterio de 'comparable'). Por eso viven en Parametros y salen en el JSON.
 """
 import json
+import math
 import statistics
 import unicodedata
 from collections import Counter, defaultdict
@@ -25,6 +26,7 @@ class Parametros:
     monto_columnas_grupo: tuple = ("tipo_proc_norm",)   # criterio de 'comparable' (pendiente del socio)
     monto_min_grupo: int = 5
     monto_umbral_z: float = 3.5            # puntaje z robusto (mediana y MAD)
+    monto_escala_log: bool = True          # los montos son muy asimétricos: se compara sobre el logaritmo
     comparables_confianza_alta: int = 30
     comparables_confianza_media: int = 10
 
@@ -106,19 +108,23 @@ def detectar_monto_atipico(contratos: list[dict], p: Parametros) -> list[Senal]:
             continue
         evaluados += 1
         montos = [c["monto"] for c in cs]
-        med = statistics.median(montos)
-        mad = statistics.median(abs(m - med) for m in montos)
+        f, inv = (math.log, math.exp) if p.monto_escala_log else (float, float)
+        vals = [f(m) for m in montos]
+        med = statistics.median(vals)
+        mad = statistics.median(abs(v - med) for v in vals)
         if mad > 0:
             escala = mad / 0.6745
-            inf, sup, metodo = med - p.monto_umbral_z * escala, med + p.monto_umbral_z * escala, "mediana y MAD (puntaje z robusto)"
+            inf, sup = med - p.monto_umbral_z * escala, med + p.monto_umbral_z * escala
+            metodo = "mediana y MAD (puntaje z robusto)" + (" sobre el logaritmo del monto" if p.monto_escala_log else "")
         else:
-            q = statistics.quantiles(montos, n=4, method="inclusive")
+            q = statistics.quantiles(vals, n=4, method="inclusive")
             iqr = q[2] - q[0]
             escala, inf, sup, metodo = None, q[0] - 1.5 * iqr, q[2] + 1.5 * iqr, "rango intercuartil (MAD=0)"
         for c in cs:
-            if inf <= c["monto"] <= sup:
+            v = f(c["monto"])
+            if inf <= v <= sup:
                 continue
-            z = (c["monto"] - med) / escala if escala else None
+            z = (v - med) / escala if escala else None
             base = 0 if len(cs) >= p.comparables_confianza_alta else (1 if len(cs) >= p.comparables_confianza_media else 2)
             problemas = base + (1 if c["en_contradiccion"] else 0)
             senales.append(Senal(
@@ -129,9 +135,9 @@ def detectar_monto_atipico(contratos: list[dict], p: Parametros) -> list[Senal]:
                 nivel="alto" if (z is not None and abs(z) >= 2 * p.monto_umbral_z) else "medio",
                 confianza=_confianza(problemas), periodo=_periodo([c]),
                 valores_calculados={
-                    "monto": c["monto"], "direccion": "alto" if c["monto"] > sup else "bajo",
-                    "mediana_grupo": round(med, 2), "mad": round(mad, 2),
-                    "umbral_superior": round(sup, 2), "umbral_inferior": round(inf, 2),
+                    "monto": c["monto"], "direccion": "alto" if v > sup else "bajo",
+                    "mediana_grupo": round(statistics.median(montos), 2), "mad": round(mad, 4),
+                    "umbral_superior": round(inv(sup), 2), "umbral_inferior": round(inv(inf), 2),
                     "puntaje_z": None if z is None else round(z, 2), "tamano_grupo": len(cs), "metodo": metodo,
                     "grupo": dict(zip(p.monto_columnas_grupo, clave))},
                 contratos_ids=[c["id"]], afectada_por_contradiccion=c["en_contradiccion"]))
@@ -275,7 +281,9 @@ def construir_excluidos(contratos: list[dict]) -> list[dict]:
         elif c["moneda"] != "MXN":
             add(c, f"moneda distinta de pesos ({c['moneda']})", monto_alc)
         if c["fecha"] is None:
-            add(c, "fecha inválida" if c["fecha_texto_invalido"] else "sin fecha", ["ADJ_DIRECTA_RECURRENTE"])
+            motivo = (f"fecha fuera del rango válido del ETL ({c['fecha_estado']})" if c.get("fecha_estado")
+                      else "fecha inválida" if c["fecha_texto_invalido"] else "sin fecha")
+            add(c, motivo, ["ADJ_DIRECTA_RECURRENTE"])
         if c["proveedor_key"] is None:
             add(c, "proveedor no identificable", ["ADJ_DIRECTA_RECURRENTE", "concentracion"])
         if not c["rfc_valido"]:

@@ -106,6 +106,29 @@ class Deteccion(unittest.TestCase):
                           alfa["porcentaje_adjudicaciones_directas"]), (3, 4850000.0, 93.8, 100.0))
 
 
+class DatosReales(unittest.TestCase):
+    def test_fecha_fuera_de_rango_del_etl_no_se_usa(self):
+        filas = [dict(f, fecha_inicio_valida=(i != 0), fecha_inicio_estado="anterior_al_rango") for i, f in enumerate(BASE[:3])]
+        res = ejecutar(filas, moneda_por_defecto="MXN")
+        self.assertEqual(por_codigo(res, "ADJ_DIRECTA_RECURRENTE"), [])          # quedan 2 con fecha válida
+        self.assertIn("fecha fuera del rango válido del ETL (anterior_al_rango)",
+                      {e["motivo"] for e in res["excluidos"]})
+
+    def test_montos_asimetricos_en_escala_logaritmica(self):
+        # montos que crecen ~25%: en escala lineal los grandes parecen atípicos; en logaritmo, no
+        filas = [{"id": f"L{i}", "proveedor": f"P{i}", "rfc": None, "monto": round(50000 * 1.25 ** i, 2),
+                  "dependencia": "D", "tipo_procedimiento": "Licitación pública", "fecha": "2026-02-01", "fuente": F}
+                 for i in range(20)]
+        logaritmico = por_codigo(ejecutar(filas, moneda_por_defecto="MXN"), "MONTO_ATIPICO")
+        lineal = por_codigo(ejecutar(filas, parametros=Parametros(monto_escala_log=False), moneda_por_defecto="MXN"), "MONTO_ATIPICO")
+        self.assertEqual(logaritmico, [])
+        self.assertGreater(len(lineal), 0)
+
+    def test_diagnostico_de_fechas_repetidas(self):
+        res = ejecutar(BASE[:3] * 1 + [dict(BASE[3], fecha="2026-03-02")], moneda_por_defecto="MXN")
+        self.assertEqual(res["calidad"]["fechas_mas_frecuentes"][0]["fecha"], "2026-03-02")
+
+
 class Contrato(unittest.TestCase):
     def test_el_json_cumple_el_contrato(self):
         res = ejecutar(BASE + [DOC], listado_69b=LISTADO, moneda_por_defecto="MXN", prioridad_fuentes=(F,))

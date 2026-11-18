@@ -12,6 +12,7 @@ import argparse
 import csv
 import json
 import sys
+from collections import Counter
 from dataclasses import asdict
 from datetime import datetime, timezone
 
@@ -34,6 +35,11 @@ def ejecutar(filas, coincidencias=None, listado_69b=None, recuperador=None, para
     normas, sin_norma = ([], [])
     if recuperador is not None:
         normas, sin_norma = recuperar_normas(senales_d, contratos, recuperador, top_k, umbral_distancia)
+    fechas = Counter(c["fecha"].isoformat() for c in contratos if c["fecha"])
+    calidad["fechas_mas_frecuentes"] = [{"fecha": d, "contratos": n, "porcentaje": round(100 * n / len(contratos), 1)}
+                                        for d, n in fechas.most_common(3)]      # una fecha dominante delata fechas de relleno
+    exclusiones = construir_excluidos(contratos)
+    calidad["exclusiones_por_motivo"] = dict(Counter(e["motivo"] for e in exclusiones))
     calidad["normativa_consultada"] = recuperador is not None
     calidad["senales_evaluadas"] = sum(s["estado"] == "evaluada" for s in senales_d)
     calidad["senales_no_evaluables"] = sum(s["estado"] == "no_evaluable" for s in senales_d)
@@ -51,7 +57,7 @@ def ejecutar(filas, coincidencias=None, listado_69b=None, recuperador=None, para
         "senales": senales_d,
         "normas_recuperadas": normas,
         "sin_norma_aplicable": sin_norma,
-        "excluidos": construir_excluidos(contratos),
+        "excluidos": exclusiones,
         "contradicciones": contradicciones,
         "concentracion": calcular_concentracion(contratos),
         "patrones_adjudicacion": calcular_patrones(contratos),
@@ -110,12 +116,13 @@ def _leer(conn, institucion, desde, hasta, limite):
     with conn.cursor() as cur:
         cur.execute("""
             SELECT codigo_contrato AS id, proveedor, rfc, importe AS monto, moneda, institucion AS dependencia,
-                   tipo_procedimiento, tipo_procedimiento_norm, fecha_inicio AS fecha, fecha_fin, fuente
+                   tipo_procedimiento, tipo_procedimiento_norm, fecha_inicio AS fecha, fecha_fin, fuente,
+                   fecha_inicio_estado, fecha_inicio_valida
             FROM clean.contratos
             WHERE (%(i)s::text IS NULL OR institucion ILIKE '%%' || %(i)s || '%%')
               AND (%(d)s::date IS NULL OR fecha_inicio >= %(d)s::date)
               AND (%(h)s::date IS NULL OR fecha_inicio <= %(h)s::date)
-            ORDER BY fecha_inicio, codigo_contrato LIMIT %(n)s""", {"i": institucion, "d": desde, "h": hasta, "n": limite})
+            ORDER BY fecha_inicio DESC NULLS LAST, codigo_contrato LIMIT %(n)s""", {"i": institucion, "d": desde, "h": hasta, "n": limite})
         cols = [c.name for c in cur.description]
         filas = [dict(zip(cols, r)) for r in cur.fetchall()]
         ids = [f["id"] for f in filas if f["id"]]
