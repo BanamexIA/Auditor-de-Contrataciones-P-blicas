@@ -47,6 +47,7 @@ services:
       AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET in .env (python -c "import secrets; print(secrets.token_urlsafe(48))")}
       AUTH_TOKEN_HORAS: ${AUTH_TOKEN_HORAS:-8}
       CORS_ORIGENES: ${CORS_ORIGENES:-http://localhost:8080}
+      LLM_TIMEOUT_S: ${LLM_TIMEOUT_S:-120}
       REPORTES_ALMACEN: ${REPORTES_ALMACEN:-local}
       REPORTES_DIR: /app/data/reportes
       REPORTES_S3_BUCKET: ${REPORTES_S3_BUCKET:-}
