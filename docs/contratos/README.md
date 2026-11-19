@@ -11,6 +11,7 @@ contrato hasta que el equipo lo cambie aquí.
 | 4 | Fragmento y cita normativa | — | Pendiente |
 | 5 | Evento de bitácora | [evento_bitacora.md](evento_bitacora.md) | Aprobado por Backend (14 nov) |
 | 6 | API del backend | [api_casos.md](api_casos.md) (casos y estados), [decisiones.md](decisiones.md) (señales y decisiones, HU-07), [reportes.md](reportes.md) (almacenamiento local y S3, B5 y B8), [agentes.md](agentes.md) (registro de agentes, B7) | Aprobado por Backend (11 nov) |
+| 6b | Autenticación | [autenticacion.md](autenticacion.md) (login, token, roles, enlace de reportes) | Aprobado por Backend (19 nov) |
 | 7 | Vistas | — | Pendiente (depende de T5 y T6) |
 
 Un contrato pasa de **Borrador** a **Congelado** cuando lo aprueban los frentes

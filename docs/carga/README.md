@@ -13,6 +13,10 @@ docker compose exec backend python -m backend.carga todo --usuarios 3 --repetici
 docker compose exec backend cat /app/data/reportes/carga.md
 ```
 
+Con autenticación activa, agrega `--usuario <usuario>` y pasa la contraseña en
+`CARGA_CONTRASENA` (`docker compose exec -e CARGA_CONTRASENA=… backend …`) o
+escríbela cuando la pida (`exec -it`).
+
 `todo` corre los cuatro escenarios; también se pueden correr uno por uno
 (`api`, `carrera`, `reportes`, `llm`). Los casos que crea la prueba se quedan en
 la BD con la solicitud "Carga …" o "Carrera …".
@@ -29,7 +33,8 @@ la BD con la solicitud "Carga …" o "Carrera …".
 | Fecha | Dónde | Resultado |
 |---|---|---|
 | 19 nov | Local (Docker Desktop) | `api`, `carrera`, `reportes`: OK — [local_2026-11-19.md](local_2026-11-19.md). `llm` no aplica (sin agentes registrados en local) |
-| | EC2 + laptops por Tailscale | Pendiente |
+| 19 nov | EC2 + S3 + 1 laptop por Tailscale (`qwen2.5:0.5b`) | Los 4 escenarios OK; 0 errores en 300 peticiones, p95 ≤ 54 ms; 3 llamadas LLM simultáneas sin degradación — [ec2_2026-11-19.md](ec2_2026-11-19.md) |
+| | EC2 con `qwen2.5:7b` y 2+ laptops | Pendiente (antes de la entrega final) |
 
 ### Hallazgo y corrección (19 nov)
 

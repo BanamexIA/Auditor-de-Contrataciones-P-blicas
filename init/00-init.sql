@@ -63,3 +63,6 @@ SELECT format(
 \ir /opt/etl/sql/13_audit_reportes.sql
 \ir /opt/etl/sql/14_audit_agentes.sql
 \ir /opt/etl/sql/15_telemetry_caso.sql
+\ir /opt/etl/sql/16_rol_backend.sql
+\ir /opt/etl/sql/17_revocar_audit_etl.sql
+\ir /opt/etl/sql/18_audit_usuarios.sql

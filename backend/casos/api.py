@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
+from urllib.parse import urlencode
 from typing import Any
 
 from flask import Blueprint, Response, current_app, jsonify, redirect, request
@@ -13,6 +15,10 @@ from backend.casos.estados import ESTADOS, TransicionInvalida
 from backend.casos.repositorio import CasoNoEncontrado, RepositorioCasos, ReporteNoEncontrado
 from backend.reportes.almacen import AlmacenNoDisponible, ArchivoNoEncontrado
 from backend.reportes.servicio import ReporteCorrupto, leer_reporte
+from backend.usuarios.auth import usuario_actual
+from backend.usuarios.seguridad import firmar_descarga
+
+EXPIRA_ENLACE_S = 300
 
 LIMITE_DEFECTO = 50
 LIMITE_MAXIMO = 100
@@ -55,7 +61,7 @@ def crear_caso():
     solicitud = datos.get("solicitud") if datos else None
     if not isinstance(solicitud, str) or not solicitud.strip():
         return _error(400, "solicitud_invalida", "El campo 'solicitud' es obligatorio.")
-    caso = _repo().crear(solicitud)
+    caso = _repo().crear(solicitud, creado_por=usuario_actual())
     respuesta = jsonify(_caso_json(caso))
     respuesta.status_code = 201
     respuesta.headers["Location"] = f"/casos/{caso['id']}"
@@ -118,7 +124,7 @@ def decidir_senal(caso_id: str, senal_id: str):
         return _error(400, "solicitud_invalida", "El cuerpo debe ser un objeto JSON.")
     try:
         decision = _repo().decidir(caso_id, senal_id, datos.get("decision"),
-                                   datos.get("comentario"))
+                                   datos.get("comentario"), decidido_por=usuario_actual())
     except DecisionInvalida as exc:
         return _error(400, "solicitud_invalida", str(exc))
     except CasoNoEncontrado:
@@ -169,6 +175,29 @@ def telemetria_caso(caso_id: str):
     )
 
 
+@bp.get("/casos/<caso_id>/reportes/<int:version>/enlace")
+def enlace_reporte(caso_id: str, version: int):
+    """URL temporal para mostrar el reporte en un <iframe> o enlace (sin header)."""
+    try:
+        reporte = _repo().obtener_reporte(caso_id, version)
+    except ReporteNoEncontrado:
+        return _error(404, "reporte_no_encontrado",
+                      f"No existe la versión {version} del reporte del caso {caso_id}.")
+    try:
+        url = current_app.extensions["almacen_reportes"].url_descarga(reporte["uri"], EXPIRA_ENLACE_S)
+    except AlmacenNoDisponible:
+        return _error(503, "almacen_no_disponible",
+                      "El almacén de reportes no responde. Intenta más tarde.")
+    exp = int(time.time()) + EXPIRA_ENLACE_S
+    if not url:
+        url = f"/casos/{caso_id}/reportes/{version}/archivo"
+        cfg = current_app.extensions.get("auth")
+        if cfg is not None:
+            exp, firma = firmar_descarga(cfg.secreto, f"{caso_id}/{version}", EXPIRA_ENLACE_S)
+            url += "?" + urlencode({"exp": exp, "firma": firma})
+    return jsonify(url=url, expira=exp)
+
+
 @bp.get("/casos/<caso_id>/reportes/<int:version>/archivo")
 def archivo_reporte(caso_id: str, version: int):
     try:
@@ -207,7 +236,7 @@ def transitar_caso(caso_id: str):
     if motivo is not None and not isinstance(motivo, str):
         return _error(400, "solicitud_invalida", "El campo 'motivo' debe ser texto.")
     try:
-        caso = _repo().transitar(caso_id, destino, motivo)
+        caso = _repo().transitar(caso_id, destino, motivo, usuario=usuario_actual())
     except CasoNoEncontrado:
         return _error(404, "caso_no_encontrado", f"No existe el caso {caso_id}.")
     except TransicionInvalida as exc:

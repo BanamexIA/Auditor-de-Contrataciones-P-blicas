@@ -34,6 +34,9 @@ from typing import Any, Callable
 
 # ---------------------------------------------------------------- HTTP
 
+TOKEN: str | None = None  # se llena con --usuario (POST /auth/login)
+
+
 class Api:
     def __init__(self, url: str) -> None:
         self.url = url.rstrip("/")
@@ -44,8 +47,10 @@ class Api:
     def llamar(self, metodo: str, ruta: str, nombre: str, cuerpo: dict | None = None,
                esperado: int | tuple[int, ...] = 200) -> tuple[int, Any]:
         datos = json.dumps(cuerpo).encode() if cuerpo is not None else None
-        req = urllib.request.Request(self.url + ruta, data=datos, method=metodo,
-                                     headers={"Content-Type": "application/json"})
+        headers = {"Content-Type": "application/json"}
+        if TOKEN:
+            headers["Authorization"] = f"Bearer {TOKEN}"
+        req = urllib.request.Request(self.url + ruta, data=datos, method=metodo, headers=headers)
         inicio = time.perf_counter()
         try:
             with urllib.request.urlopen(req, timeout=30) as r:
@@ -247,7 +252,21 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--repeticiones", type=int, default=10)
     p.add_argument("--modelo", help="Modelo para el escenario llm (por defecto el del agente)")
     p.add_argument("--salida", help="Guardar el resultado en Markdown")
+    p.add_argument("--usuario", help="Iniciar sesión con este usuario (la contraseña se pide "
+                                     "o se lee de CARGA_CONTRASENA)")
     a = p.parse_args(argv)
+
+    if a.usuario and a.escenario in ("api", "carrera", "todo"):
+        global TOKEN
+        import getpass
+        import os
+        contrasena = os.environ.get("CARGA_CONTRASENA") or getpass.getpass("Contraseña: ")
+        codigo, datos = Api(a.url).llamar("POST", "/auth/login", "login",
+                                          {"usuario": a.usuario, "contrasena": contrasena})
+        if codigo != 200:
+            print(f"No se pudo iniciar sesión: HTTP {codigo} {datos}", file=sys.stderr)
+            return 2
+        TOKEN = datos["token"]
 
     pasos: list[Callable[[], dict[str, Any]]] = []
     if a.escenario in ("api", "todo"):

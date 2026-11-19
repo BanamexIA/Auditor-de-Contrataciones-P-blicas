@@ -9,6 +9,8 @@ from backend.agentes.api import bp as agentes_bp
 from backend.agentes.repositorio import RepositorioAgentes, RepositorioAgentesSQL
 from backend.agentes.servicio import MonitorAgentes
 from backend.agentes.verificacion import ClienteHttp
+from backend.usuarios.auth import configurar_auth, info_auth
+from backend.usuarios.repositorio import RepositorioUsuarios, RepositorioUsuariosSQL
 from backend.casos.api import bp as casos_bp
 from backend.casos.repositorio import RepositorioCasos, RepositorioCasosSQL
 from backend.reportes.almacen import AlmacenReportes, almacen_desde_entorno
@@ -26,12 +28,32 @@ def engine_desde_entorno() -> Engine:
     return create_engine(database_url, pool_pre_ping=True)
 
 
+def engine_agente_desde_entorno(timeout_s: int = 30) -> Engine:
+    """Conexión para el SQL que generan los agentes: rol agent_ro, solo lectura.
+
+    Dos defensas: el rol solo tiene SELECT sobre clean y rag, y además cada sesión
+    es de solo lectura y corta las consultas que tarden más de ``timeout_s``.
+    """
+    database_url = URL.create(
+        drivername="postgresql+psycopg",
+        username=os.environ.get("AGENT_RO_USER", "agent_ro"),
+        password=os.environ["AGENT_RO_PASSWORD"],
+        host=os.environ.get("DB_HOST", "db"),
+        port=int(os.environ.get("DB_PORT", "5432")),
+        database=os.environ["DB_NAME"],
+    )
+    opciones = f"-c default_transaction_read_only=on -c statement_timeout={timeout_s * 1000}"
+    return create_engine(database_url, pool_pre_ping=True, connect_args={"options": opciones})
+
+
 def create_app(
     engine: Engine | None = None,
     repositorio: RepositorioCasos | None = None,
     almacen: AlmacenReportes | None = None,
     repositorio_agentes: RepositorioAgentes | None = None,
     http_agentes: ClienteHttp | None = None,
+    repositorio_usuarios: RepositorioUsuarios | None = None,
+    auth_secreto: str | None = None,
 ) -> Flask:
     app = Flask(__name__)
     app.json.ensure_ascii = False
@@ -42,6 +64,8 @@ def create_app(
         repositorio = RepositorioCasosSQL(engine)
     if repositorio_agentes is None and engine is not None:
         repositorio_agentes = RepositorioAgentesSQL(engine)
+    if repositorio_usuarios is None and engine is not None:
+        repositorio_usuarios = RepositorioUsuariosSQL(engine)
     app.extensions["repositorio_casos"] = repositorio
     app.extensions["almacen_reportes"] = almacen or almacen_desde_entorno()
     app.extensions["repositorio_agentes"] = repositorio_agentes
@@ -55,7 +79,7 @@ def create_app(
 
     @app.get("/health")
     def health():
-        return jsonify(status="ok")
+        return jsonify(status="ok", **info_auth())
 
     @app.get("/health/db")
     def database_health():
@@ -69,6 +93,7 @@ def create_app(
             return jsonify(status="error", database="unavailable"), 503
         return jsonify(status="ok", database="connected")
 
+    configurar_auth(app, repositorio_usuarios, auth_secreto)
     app.register_blueprint(casos_bp)
     app.register_blueprint(agentes_bp)
     _errores_en_json(app)

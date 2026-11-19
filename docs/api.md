@@ -4,9 +4,10 @@ Referencia de los endpoints del backend para el front-end y la orquestación.
 Los ejemplos salen de la API corriendo con datos de prueba. Las reglas de negocio detrás de
 cada endpoint están en [`docs/contratos/`](contratos/README.md).
 
-> **Autenticación:** todavía no hay. Ningún endpoint pide usuario ni token y
-> `creado_por` / `decidido_por` llegan en `null`. Cuando exista, se agregará un
-> encabezado `Authorization` sin cambiar las rutas.
+> **Autenticación:** todas las rutas, salvo `/health`, `/health/db` y
+> `POST /auth/login`, piden `Authorization: Bearer <token>`. Flujo completo,
+> roles y seguridad en [autenticacion.md](contratos/autenticacion.md).
+> `creado_por`, `decidido_por` y el usuario de la bitácora salen del token.
 
 ## Resumen
 
@@ -14,6 +15,8 @@ cada endpoint están en [`docs/contratos/`](contratos/README.md).
 |---|---|---|---|
 | `GET` | [`/health`](#get-health) | ¿El backend está vivo? | Docker, monitoreo |
 | `GET` | [`/health/db`](#get-healthdb) | ¿El backend llega a la base? | Docker, monitoreo |
+| `POST` | [`/auth/login`](#post-authlogin) | Iniciar sesión: usuario y contraseña → token | Front |
+| `GET` | [`/auth/yo`](#get-authyo) | ¿Quién soy? ¿Sigue vigente mi token? | Front |
 | `POST` | [`/casos`](#post-casos) | Crear un caso con la pregunta del auditor | Front |
 | `GET` | [`/casos`](#get-casos) | Listar casos (filtro por estado) | Front |
 | `GET` | [`/casos/<id>`](#get-casosid) | Ver un caso | Front |
@@ -22,6 +25,7 @@ cada endpoint están en [`docs/contratos/`](contratos/README.md).
 | `GET` | [`/casos/<id>/senales`](#get-casosidsenales) | Señales y su decisión vigente | Front |
 | `POST` | [`/casos/<id>/senales/<senal_id>/decision`](#post-casosidsenalessenal_iddecision) | Decidir sobre una señal (HU-07) | Front |
 | `GET` | [`/casos/<id>/reportes`](#get-casosidreportes) | Versiones del reporte | Front |
+| `GET` | [`/casos/<id>/reportes/<version>/enlace`](#get-casosidreportesversionenlace) | URL temporal del reporte para un `<iframe>` | Front |
 | `GET` | [`/casos/<id>/reportes/<version>/archivo`](#get-casosidreportesversionarchivo) | Descargar un reporte | Front |
 | `GET` | [`/casos/<id>/telemetria`](#get-casosidtelemetria) | Tokens y latencia del modelo en el caso (B9) | Front, evaluación |
 | `GET` | [`/agentes`](#get-agentes) | Laptops con Ollama registradas y su estado | Front, monitoreo |
@@ -76,6 +80,11 @@ Muestra `mensaje` al usuario; usa `codigo` para decidir qué hacer.
 | HTTP | `codigo` | Significado |
 |---|---|---|
 | 400 | `solicitud_invalida` | Falta un campo, el JSON es inválido o un valor está fuera de rango |
+| 401 | `no_autenticado` | Falta el token, es inválido, expiró o el usuario fue dado de baja: lleva al login |
+| 401 | `credenciales_invalidas` | Usuario o contraseña incorrectos (login) |
+| 403 | `sin_permiso` | Tu rol no permite la acción |
+| 429 | `demasiados_intentos` | 5 logins fallidos en 5 min; espera |
+| 503 | `auth_no_configurada` | El backend corre sin `AUTH_SECRET` (solo desarrollo) |
 | 404 | `caso_no_encontrado` | El caso no existe |
 | 404 | `senal_no_encontrada` | La señal no existe o no es de ese caso |
 | 404 | `reporte_no_encontrado` | No existe esa versión del reporte (o el caso) |
@@ -133,6 +142,27 @@ solo se avanza al siguiente, bloquear exige `motivo`, desbloquear regresa a
 
 Si da 503, revisa `docker compose logs backend`: el detalle (por ejemplo,
 contraseña incorrecta) está ahí, no en la respuesta.
+
+## `POST /auth/login`
+
+```json
+{"usuario": "ana", "contrasena": "…"}
+```
+
+**200**:
+
+```json
+{"token": "eyJzdWIi…", "expira": 1763569000,
+ "usuario": {"usuario": "ana", "nombre": "Ana P.", "rol": "auditor"}}
+```
+
+`expira` es una marca Unix (segundos). **400** `solicitud_invalida` ·
+**401** `credenciales_invalidas` · **429** `demasiados_intentos`.
+
+## `GET /auth/yo`
+
+**200** `{"usuario": {"usuario": "ana", "nombre": "Ana P.", "rol": "auditor"}}` ·
+**401** `no_autenticado`.
 
 ## `POST /casos`
 
@@ -251,6 +281,18 @@ Versiones del reporte, de la más antigua a la más reciente.
 
 **200** · **404** `caso_no_encontrado`.
 
+## `GET /casos/<id>/reportes/<version>/enlace`
+
+URL temporal (5 min) para poner en un `<iframe>` o enlace, que no pueden mandar
+el header `Authorization`. Con S3 es la URL prefirmada; en local, la ruta
+`/archivo` con `?exp=…&firma=…` (anteponle `/api` en el front).
+
+```json
+{"url": "/casos/6f1c…/reportes/1/archivo?exp=1763540000&firma=Qm9…", "expira": 1763540000}
+```
+
+**200** · **404** `reporte_no_encontrado` · **503** `almacen_no_disponible`.
+
 ## `GET /casos/<id>/reportes/<version>/archivo`
 
 Descarga el archivo. Para mostrar el PDF en el front basta con un
@@ -337,6 +379,7 @@ Funciones de Python dentro del backend (no HTTP):
 | `repo.registrar_evento(caso_id, evento, detalle)` | Registrar `sql_ejecutado`, `reglas_evaluadas`, etc. |
 | `repo.registrar_senales(caso_id, [{"tipo": …, "datos": {…}}])` | Guardar las señales de la Tool 1 |
 | `servicio.guardar_reporte(repo, almacen, caso_id, contenido, formato)` | Guardar el reporte del Agente Reportes |
+| `app.engine_agente_desde_entorno()` | Conexión para **ejecutar el SQL que genera el agente**: rol `agent_ro`, sesión de solo lectura y corte a los 30 s. Nunca uses `engine_desde_entorno()` para ese SQL |
 | `agentes.servicio.seleccionar_agente(repo_agentes, usuario)` | Elegir una laptop disponible (verificada en ese momento); devuelve `url` y `modelo` para `OllamaClient`. Si ninguna responde lanza `AgenteNoDisponible`, cuyo mensaje es el motivo para bloquear el caso |
 
 `repo` es `RepositorioCasosSQL` (`backend/casos/repositorio.py`); el almacén

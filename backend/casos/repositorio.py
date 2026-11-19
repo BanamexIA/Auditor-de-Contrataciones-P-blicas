@@ -32,7 +32,8 @@ class RepositorioCasos(Protocol):
     def crear(self, solicitud: str, creado_por: str | None = None) -> dict[str, Any]: ...
     def obtener(self, caso_id: str) -> dict[str, Any]: ...
     def listar(self, estado: str | None, limite: int) -> list[dict[str, Any]]: ...
-    def transitar(self, caso_id: str, destino: str, motivo: str | None) -> dict[str, Any]: ...
+    def transitar(self, caso_id: str, destino: str, motivo: str | None,
+                  usuario: str | None = None) -> dict[str, Any]: ...
     def registrar_evento(
         self,
         caso_id: str,
@@ -164,7 +165,8 @@ class RepositorioCasosSQL:
             ).mappings().all()
         return [dict(f) for f in filas]
 
-    def transitar(self, caso_id: str, destino: str, motivo: str | None) -> dict[str, Any]:
+    def transitar(self, caso_id: str, destino: str, motivo: str | None,
+                  usuario: str | None = None) -> dict[str, Any]:
         with self.engine.begin() as conn:
             actual = conn.execute(
                 text(
@@ -201,6 +203,8 @@ class RepositorioCasosSQL:
                 detalle["motivo"] = nuevo.motivo_bloqueo
             elif actual["motivo_bloqueo"]:
                 detalle["motivo_desbloqueado"] = actual["motivo_bloqueo"]
+            if usuario:
+                detalle["usuario"] = usuario
             _insertar_evento(conn, caso_id, actual["estado"], TRANSICION, detalle)
         return dict(fila)
 

@@ -50,7 +50,7 @@ class RepositorioEnMemoria:
         casos = [c for c in self.casos.values() if estado is None or c["estado"] == estado]
         return [dict(c) for c in reversed(casos)][:limite]
 
-    def transitar(self, caso_id, destino, motivo):
+    def transitar(self, caso_id, destino, motivo, usuario=None):
         caso = self.casos.get(caso_id)
         if caso is None:
             raise CasoNoEncontrado(caso_id)
@@ -65,6 +65,8 @@ class RepositorioEnMemoria:
             detalle["motivo"] = nuevo.motivo_bloqueo
         elif caso["motivo_bloqueo"]:
             detalle["motivo_desbloqueado"] = caso["motivo_bloqueo"]
+        if usuario:
+            detalle["usuario"] = usuario
         self._evento(caso_id, caso["estado"], TRANSICION, detalle)
         caso.update(estado=nuevo.estado, estado_previo=nuevo.estado_previo,
                     motivo_bloqueo=nuevo.motivo_bloqueo)

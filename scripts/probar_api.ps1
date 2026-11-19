@@ -1,21 +1,25 @@
 ﻿# Prueba de punta a punta de la API contra el backend y Postgres reales.
 # Uso:  .\scripts\probar_api.ps1                 (local, http://localhost:5000)
 #       .\scripts\probar_api.ps1 -Api http://localhost:15000   (EC2 por túnel; -SinDocker)
-# Requiere las migraciones 10 a 13 aplicadas. Crea un caso de prueba nuevo en cada corrida.
+#       -Usuario ana   inicia sesión (pide la contraseña) si la API tiene AUTH_SECRET
+# Requiere las migraciones 10 a 18 aplicadas. Crea un caso de prueba nuevo en cada corrida.
 param(
     [string]$Api = "http://localhost:5000",
+    [string]$Usuario,
     [switch]$SinDocker   # no inserta señal ni reporte (necesitan docker compose exec)
 )
 
 $ErrorActionPreference = "Stop"
 $script:fallas = 0
 $json = "application/json; charset=utf-8"
+$script:token = $null
 
 function Ok($texto)    { Write-Host "  OK    $texto" -ForegroundColor Green }
 function Falla($texto) { Write-Host "  FALLA $texto" -ForegroundColor Red; $script:fallas++ }
 
 function Llamar($metodo, $ruta, $cuerpo = $null) {
     $params = @{ Method = $metodo; Uri = "$Api$ruta"; UseBasicParsing = $true }
+    if ($script:token) { $params.Headers = @{ Authorization = "Bearer $($script:token)" } }
     if ($null -ne $cuerpo) {
         $params.ContentType = $json
         $params.Body = [Text.Encoding]::UTF8.GetBytes(($cuerpo | ConvertTo-Json -Compress))
@@ -43,9 +47,26 @@ Esperar "GET /health" (Llamar GET "/health") 200
 Esperar "GET /health/db" (Llamar GET "/health/db") 200 { param($d) $d.database -eq "connected" }
 if ($script:fallas) { Write-Host "`nEl backend no llega a la base; revisa 'docker compose logs backend'." -ForegroundColor Red; exit 1 }
 
+Write-Host "`nAutenticación" -ForegroundColor Cyan
+if ((Llamar GET "/health").Datos.auth -eq "activa") {
+    Esperar "Sin token" (Llamar GET "/casos") 401 { param($d) $d.error.codigo -eq "no_autenticado" }
+    if (-not $Usuario) { Write-Host "La API pide sesión: vuelve a correr con -Usuario <usuario>." -ForegroundColor Red; exit 1 }
+    Esperar "Contraseña incorrecta" (Llamar POST "/auth/login" @{ usuario = $Usuario; contrasena = "incorrecta-$([guid]::NewGuid())" }) 401
+    $segura = Read-Host "Contraseña de $Usuario" -AsSecureString
+    $plano = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($segura))
+    $r = Llamar POST "/auth/login" @{ usuario = $Usuario; contrasena = $plano }
+    $plano = $null
+    Esperar "Iniciar sesión" $r 200 { param($d) $d.token }
+    if ($r.Codigo -ne 200) { exit 1 }
+    $script:token = $r.Datos.token
+    Esperar "Quién soy" (Llamar GET "/auth/yo") 200 { param($d) $d.usuario.usuario -eq $Usuario.ToLower() }
+} else {
+    Write-Host "  (autenticación desactivada en este backend)" -ForegroundColor Yellow
+}
+
 Write-Host "`nCasos (B2)" -ForegroundColor Cyan
 $r = Llamar POST "/casos" @{ solicitud = "Prueba de punta a punta: contratos de la empresa X en 2026" }
-Esperar "Crear caso" $r 201 { param($d) $d.estado -eq "recibido" }
+Esperar "Crear caso" $r 201 { param($d) $d.estado -eq "recibido" -and (-not $script:token -or $d.creado_por -eq $Usuario.ToLower()) }
 $id = $r.Datos.id
 Esperar "Ver caso" (Llamar GET "/casos/$id") 200 { param($d) $d.id -eq $id }
 Esperar "Listar con filtro" (Llamar GET "/casos?estado=recibido&limite=5") 200 { param($d) $d.casos.Count -ge 1 }
@@ -85,7 +106,10 @@ if (-not $SinDocker) {
     if ($LASTEXITCODE) { Falla "Guardar reporte (¿aplicaste 13_audit_reportes.sql?)" }
     else {
         Esperar "Listar reportes" (Llamar GET "/casos/$id/reportes") 200 { param($d) $d.reportes[0].version -eq 1 }
-        $archivo = Invoke-WebRequest "$Api/casos/$id/reportes/1/archivo" -UseBasicParsing
+        $enlace = Llamar GET "/casos/$id/reportes/1/enlace"
+        Esperar "Enlace temporal" $enlace 200 { param($d) $d.url }
+        $url = if ($enlace.Datos.url -like "http*") { $enlace.Datos.url } else { "$Api$($enlace.Datos.url)" }
+        $archivo = Invoke-WebRequest $url -UseBasicParsing   # sin token: vale la firma
         $contenido = $archivo.Content
         if ($contenido -is [byte[]]) { $contenido = [Text.Encoding]::UTF8.GetString($contenido) }
         if ($contenido -eq "# Reporte de prueba") { Ok "Descargar reporte (200)" }
