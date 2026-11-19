@@ -59,7 +59,9 @@ Mensaje de ejemplo cuando nadie responde:
 
 `equipo` en la bitácora es el `nombre_tailnet` del agente (contrato 5).
 
-## Requisitos de red (por verificar en la EC2)
+## Requisitos de red
+
+Guía paso a paso para quien presta su laptop: [guia-agente-laptop.md](../guia-agente-laptop.md).
 
 1. **Política de Tailscale (verificado 18 nov).** Sin esta regla Tailscale descarta
    el tráfico EC2 → laptop (timeout, aunque `tailscale ping` responda):
