@@ -23,6 +23,7 @@ cada endpoint están en [`docs/contratos/`](contratos/README.md).
 | `POST` | [`/casos/<id>/senales/<senal_id>/decision`](#post-casosidsenalessenal_iddecision) | Decidir sobre una señal (HU-07) | Front |
 | `GET` | [`/casos/<id>/reportes`](#get-casosidreportes) | Versiones del reporte | Front |
 | `GET` | [`/casos/<id>/reportes/<version>/archivo`](#get-casosidreportesversionarchivo) | Descargar un reporte | Front |
+| `GET` | [`/casos/<id>/telemetria`](#get-casosidtelemetria) | Tokens y latencia del modelo en el caso (B9) | Front, evaluación |
 | `GET` | [`/agentes`](#get-agentes) | Laptops con Ollama registradas y su estado | Front, monitoreo |
 | `GET` | [`/agentes/<agente_id>`](#get-agentesagente_id) | Ver un agente | Front, monitoreo |
 | `POST` | [`/agentes/<agente_id>/verificar`](#post-agentesagente_idverificar) | Verificar ahora si un agente responde | Front, administrador |
@@ -262,6 +263,29 @@ Descarga el archivo. Para mostrar el PDF en el front basta con un
   pide `/archivo` cada vez.
 - **404** `reporte_no_encontrado` · **500** `reporte_corrupto` ·
   **503** `almacen_no_disponible` (S3 no responde o vencieron las credenciales del laboratorio).
+
+## `GET /casos/<id>/telemetria`
+
+Cada llamada al modelo hecha dentro del caso (de `telemetry.llm_calls`), con
+totales y desglose por agente. `equipo` es la laptop que hizo la inferencia
+(nombre de Tailscale). Sin prompts ni respuestas.
+
+```json
+{"caso_id": "6f1c…",
+ "totales": {"llamadas": 3, "errores": 1, "tokens_entrada": 600, "tokens_salida": 320, "latencia_ms": 8000.5},
+ "por_agente": [{"agente": "consultas", "llamadas": 2, "errores": 1, "tokens_entrada": 100,
+                 "tokens_salida": 20, "latencia_ms": 3800.0}, …],
+ "llamadas": [{"started_at": "2026-11-20T18:00:00Z", "agente": "consultas", "modelo": "qwen2.5:7b",
+               "equipo": "laptop-mich", "tokens_entrada": 100, "tokens_salida": 20,
+               "latencia_ms": 800.0, "tokens_por_segundo": 25.0, "estado": "ok", "tipo_error": null}]}
+```
+
+**200** · **404** `caso_no_encontrado`.
+
+Para que una llamada quede ligada al caso, el orquestador usa
+`bitacora.llamar_llm(...)`: escribe el evento `llamada_llm` y la fila de
+telemetría con `caso_id`, agente y laptop. Si la telemetría no se puede
+escribir, se registra un aviso en el log y **el caso sigue**.
 
 ## `GET /agentes`
 

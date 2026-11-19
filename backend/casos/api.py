@@ -143,6 +143,32 @@ def reportes_caso(caso_id: str):
     ])
 
 
+def _resumen(llamadas: list[dict]) -> dict:
+    return {
+        "llamadas": len(llamadas),
+        "errores": sum(1 for l in llamadas if l["estado"] != "ok"),
+        "tokens_entrada": sum(l["tokens_entrada"] or 0 for l in llamadas),
+        "tokens_salida": sum(l["tokens_salida"] or 0 for l in llamadas),
+        "latencia_ms": round(sum(l["latencia_ms"] or 0 for l in llamadas), 1),
+    }
+
+
+@bp.get("/casos/<caso_id>/telemetria")
+def telemetria_caso(caso_id: str):
+    try:
+        llamadas = _repo().listar_llamadas_llm(caso_id)
+    except CasoNoEncontrado:
+        return _error(404, "caso_no_encontrado", f"No existe el caso {caso_id}.")
+    agentes = sorted({l["agente"] for l in llamadas})
+    return jsonify(
+        caso_id=caso_id,
+        totales=_resumen(llamadas),
+        por_agente=[{"agente": a, **_resumen([l for l in llamadas if l["agente"] == a])}
+                    for a in agentes],
+        llamadas=[_caso_json(l) for l in llamadas],
+    )
+
+
 @bp.get("/casos/<caso_id>/reportes/<int:version>/archivo")
 def archivo_reporte(caso_id: str, version: int):
     try:

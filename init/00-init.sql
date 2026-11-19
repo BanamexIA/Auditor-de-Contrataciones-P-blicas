@@ -62,3 +62,4 @@ SELECT format(
 \ir /opt/etl/sql/12_audit_senales.sql
 \ir /opt/etl/sql/13_audit_reportes.sql
 \ir /opt/etl/sql/14_audit_agentes.sql
+\ir /opt/etl/sql/15_telemetry_caso.sql

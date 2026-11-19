@@ -171,3 +171,8 @@ class RepositorioEnMemoria:
     def eventos(self, caso_id, tipo=None):
         return [ev for ev in self.bitacora
                 if ev["caso_id"] == caso_id and (tipo is None or ev["evento"] == tipo)]
+
+    def listar_llamadas_llm(self, caso_id):
+        if caso_id not in self.casos:
+            raise CasoNoEncontrado(caso_id)
+        return [dict(l) for l in getattr(self, "llamadas_llm", []) if l["caso_id"] == caso_id]

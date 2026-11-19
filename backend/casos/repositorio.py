@@ -410,3 +410,20 @@ class RepositorioCasosSQL:
         if fila is None:
             raise ReporteNoEncontrado(f"{caso_id} v{version}")
         return dict(fila)
+
+    def listar_llamadas_llm(self, caso_id: str) -> list[dict[str, Any]]:
+        """Llamadas al modelo del caso, de telemetry.llm_calls (B9)."""
+        with self.engine.connect() as conn:
+            existe = conn.execute(
+                text("SELECT 1 FROM audit.casos WHERE id = :id"), {"id": caso_id}
+            ).scalar_one_or_none()
+            if existe is None:
+                raise CasoNoEncontrado(caso_id)
+            filas = conn.execute(text(
+                "SELECT started_at, agent AS agente, model AS modelo, equipment AS equipo, "
+                "input_tokens AS tokens_entrada, output_tokens AS tokens_salida, latency_ms AS latencia_ms, "
+                "tokens_per_second AS tokens_por_segundo, CASE status WHEN 'success' THEN 'ok' ELSE status END AS estado, "
+                "error_type AS tipo_error "
+                "FROM telemetry.llm_calls WHERE caso_id = :id ORDER BY started_at, id"
+            ), {"id": caso_id}).mappings().all()
+        return [dict(f) for f in filas]
