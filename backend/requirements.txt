@@ -6,3 +6,4 @@ sqlglot==26.16.4
 pydantic==2.14.1
 reportlab==5.1.0
 ollama==0.6.3
+PyYAML==6.0.3
