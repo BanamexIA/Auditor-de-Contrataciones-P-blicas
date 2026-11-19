@@ -69,6 +69,9 @@ guardar_reporte(repo, almacen, caso_id, contenido=b"%PDF-…", formato="pdf",
    `audit.reportes` y el evento `reporte_guardado` en la bitácora, en una
    transacción. Así la BD nunca apunta a un archivo que no existe.
 3. No se puede guardar un reporte en un caso `cerrado`.
+4. Mientras se guarda, la fila del caso queda bloqueada (`FOR UPDATE`): dos
+   reportes simultáneos del mismo caso reciben versiones distintas y nunca
+   escriben el mismo archivo (encontrado y corregido en la prueba de carga B10).
 
 Formatos aceptados: `pdf` (`application/pdf`) y `md` (`text/markdown`). La
 decisión final del formato es de R1; la interfaz no cambia.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import uuid
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -54,7 +55,7 @@ class AlmacenLocal:
     def guardar(self, clave: str, contenido: bytes, content_type: str) -> str:
         ruta = self._ruta(clave)
         ruta.parent.mkdir(parents=True, exist_ok=True)
-        temporal = ruta.with_name(ruta.name + ".tmp")
+        temporal = ruta.with_name(f"{ruta.name}.{uuid.uuid4().hex}.tmp")  # único por escritura
         temporal.write_bytes(contenido)
         os.replace(temporal, ruta)  # el archivo aparece completo o no aparece
         return ESQUEMA_LOCAL + clave

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 import uuid
-from typing import Any, Protocol
+from contextlib import contextmanager
+from typing import Any, Callable, Iterator, Protocol
 
 from sqlalchemy import Connection, Engine, text
 
@@ -335,56 +336,48 @@ class RepositorioCasosSQL:
             })
         return dict(fila)
 
-    def siguiente_version_reporte(self, caso_id: str) -> int:
-        with self.engine.connect() as conn:
-            estado = conn.execute(
-                text("SELECT estado FROM audit.casos WHERE id = :id"), {"id": caso_id}
-            ).scalar_one_or_none()
-            if estado is None:
-                raise CasoNoEncontrado(caso_id)
-            if estado == CERRADO:
+    @contextmanager
+    def reservar_reporte(self, caso_id: str) -> Iterator[tuple[int, Callable[..., dict[str, Any]]]]:
+        """Reserva la siguiente versión del reporte con la fila del caso bloqueada.
+
+        Entrega ``(version, registrar)``. Dentro del bloque se guarda el archivo y
+        luego se llama ``registrar(uri=..., sha256=..., ...)``; todo se confirma al
+        salir. Mientras tanto, otro guardado del mismo caso espera, así que dos
+        reportes simultáneos nunca reciben la misma versión ni pisan el archivo.
+        """
+        with self.engine.begin() as conn:
+            etapa = _estado_bloqueando(conn, caso_id)
+            if etapa == CERRADO:
                 raise CasoCerrado(caso_id)
-            return conn.execute(
+            version = conn.execute(
                 text("SELECT coalesce(max(version), 0) + 1 FROM audit.reportes "
                      "WHERE caso_id = :id"),
                 {"id": caso_id},
             ).scalar_one()
 
-    def registrar_reporte(
-        self,
-        caso_id: str,
-        version: int,
-        uri: str,
-        sha256: str,
-        formato: str,
-        content_type: str,
-        tamano_bytes: int,
-        modelo: str | None = None,
-        equipo: str | None = None,
-    ) -> dict[str, Any]:
-        """Registra un reporte ya guardado en el almacén, con su evento de bitácora."""
-        with self.engine.begin() as conn:
-            etapa = _estado_bloqueando(conn, caso_id)
-            if etapa == CERRADO:
-                raise CasoCerrado(caso_id)
-            fila = conn.execute(
-                text(
-                    f"""
-                    INSERT INTO audit.reportes (caso_id, version, uri, sha256, formato,
-                        content_type, tamano_bytes, modelo, equipo)
-                    VALUES (:caso_id, :version, :uri, :sha256, :formato,
-                        :content_type, :tamano_bytes, :modelo, :equipo)
-                    RETURNING {_COLUMNAS_REPORTE}
-                    """
-                ),
-                {"caso_id": caso_id, "version": version, "uri": uri, "sha256": sha256,
-                 "formato": formato, "content_type": content_type,
-                 "tamano_bytes": tamano_bytes, "modelo": modelo, "equipo": equipo},
-            ).mappings().one()
-            _insertar_evento(conn, caso_id, etapa, REPORTE_GUARDADO,
-                             {"ruta": uri, "sha256": sha256, "version": version},
-                             modelo=modelo, equipo=equipo)
-        return dict(fila)
+            def registrar(uri: str, sha256: str, formato: str, content_type: str,
+                          tamano_bytes: int, modelo: str | None = None,
+                          equipo: str | None = None) -> dict[str, Any]:
+                fila = conn.execute(
+                    text(
+                        f"""
+                        INSERT INTO audit.reportes (caso_id, version, uri, sha256, formato,
+                            content_type, tamano_bytes, modelo, equipo)
+                        VALUES (:caso_id, :version, :uri, :sha256, :formato,
+                            :content_type, :tamano_bytes, :modelo, :equipo)
+                        RETURNING {_COLUMNAS_REPORTE}
+                        """
+                    ),
+                    {"caso_id": caso_id, "version": version, "uri": uri, "sha256": sha256,
+                     "formato": formato, "content_type": content_type,
+                     "tamano_bytes": tamano_bytes, "modelo": modelo, "equipo": equipo},
+                ).mappings().one()
+                _insertar_evento(conn, caso_id, etapa, REPORTE_GUARDADO,
+                                 {"ruta": uri, "sha256": sha256, "version": version},
+                                 modelo=modelo, equipo=equipo)
+                return dict(fila)
+
+            yield version, registrar
 
     def listar_reportes(self, caso_id: str) -> list[dict[str, Any]]:
         with self.engine.connect() as conn:
