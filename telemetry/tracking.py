@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import contextvars
 import csv
 import functools
 import json
+import logging
 import os
 import platform
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, ParamSpec, TypeVar, cast
+from typing import Any, Callable, Iterator, ParamSpec, TypeVar, cast
+from urllib.parse import urlparse
 
 import psycopg
 
@@ -39,6 +43,21 @@ CSV_FIELDS = (
     "error_type",
 )
 _CSV_LOCK = threading.Lock()
+_HOSTS_LOCALES = {"localhost", "127.0.0.1", "::1"}
+_contexto: contextvars.ContextVar[dict[str, str | None]] = contextvars.ContextVar(
+    "telemetria_llm", default={}
+)
+_log = logging.getLogger(__name__)
+
+
+@contextmanager
+def contexto_llamada(caso_id: str | None, agente: str | None = None) -> Iterator[None]:
+    """Asocia las llamadas al modelo dentro del bloque con un caso y un agente."""
+    token = _contexto.set({"caso_id": caso_id, "agente": agente})
+    try:
+        yield
+    finally:
+        _contexto.reset(token)
 
 
 def track_llm_call(
@@ -72,7 +91,7 @@ def track_llm_call(
                     ),
                     vram_used_mb=sampler.vram_used_mb if sampler else None,
                 )
-                record_llm_call(record)
+                _registrar_sin_fallar(record)
                 raise
 
             if not isinstance(response, LLMResponse):
@@ -82,7 +101,7 @@ def track_llm_call(
                     status="error",
                     error_type="TypeError",
                 )
-                record_llm_call(record)
+                _registrar_sin_fallar(record)
                 raise TypeError(
                     f"{method.__qualname__} must return LLMResponse for telemetry tracking."
                 )
@@ -102,7 +121,7 @@ def track_llm_call(
                 status="success",
                 error_type=None,
             )
-            record_llm_call(record)
+            _registrar_sin_fallar(record)
             if sampler is not None:
                 response = replace(
                     response,
@@ -118,19 +137,29 @@ def track_llm_call(
     return decorate
 
 
+def _registrar_sin_fallar(record: dict[str, Any]) -> None:
+    """La telemetría nunca debe tumbar la llamada al modelo ni el caso."""
+    try:
+        record_llm_call(record)
+    except Exception:
+        _log.warning("No se pudo registrar la telemetría de la llamada", exc_info=True)
+
+
 def _base_record(
     started_at: datetime,
     agent: str,
     client: Any,
 ) -> dict[str, Any]:
+    contexto = _contexto.get()
     return {
         "started_at": started_at,
-        "agent": agent,
+        "caso_id": contexto.get("caso_id"),
+        "agent": contexto.get("agente") or agent,
         "provider": getattr(client, "provider", "unknown"),
         "model": getattr(client, "model", "unknown"),
         "model_quantization": getattr(client, "model_quantization", None),
         "ollama_version": getattr(client, "ollama_version", None),
-        "equipment": _equipment_description(),
+        "equipment": _equipment_for(client),
         "input_tokens": None,
         "output_tokens": None,
         "latency_ms": None,
@@ -141,6 +170,18 @@ def _base_record(
         "status": "error",
         "error_type": None,
     }
+
+
+def _equipment_for(client: Any) -> str:
+    """Equipo que ejecutó la inferencia.
+
+    Si el modelo corre en otra máquina (una laptop por Tailscale), es el host de
+    ``base_url``; si corre aquí mismo (benchmarks locales), la descripción local.
+    """
+    host = urlparse(getattr(client, "base_url", "") or "").hostname
+    if host and host not in _HOSTS_LOCALES:
+        return host
+    return _equipment_description()
 
 
 def _equipment_description() -> str:
@@ -173,7 +214,7 @@ def _append_csv_record(record: dict[str, Any]) -> None:
     with _CSV_LOCK:
         write_header = not path.exists() or path.stat().st_size == 0
         with path.open("a", encoding="utf-8-sig", newline="") as output:
-            writer = csv.DictWriter(output, fieldnames=CSV_FIELDS)
+            writer = csv.DictWriter(output, fieldnames=CSV_FIELDS, extrasaction="ignore")
             if write_header:
                 writer.writeheader()
             writer.writerow(
@@ -191,13 +232,13 @@ def _insert_database_record(record: dict[str, Any]) -> None:
             cursor.execute(
                 """
                 INSERT INTO telemetry.llm_calls (
-                    started_at, agent, provider, model, model_quantization,
+                    caso_id, started_at, agent, provider, model, model_quantization,
                     ollama_version, equipment, input_tokens, output_tokens,
                     latency_ms, tokens_per_second, time_to_first_token_ms,
                     gpu_utilization_percent, vram_used_mb, status, error_type
                 )
                 VALUES (
-                    %(started_at)s, %(agent)s, %(provider)s, %(model)s,
+                    %(caso_id)s, %(started_at)s, %(agent)s, %(provider)s, %(model)s,
                     %(model_quantization)s, %(ollama_version)s, %(equipment)s,
                     %(input_tokens)s, %(output_tokens)s, %(latency_ms)s,
                     %(tokens_per_second)s, %(time_to_first_token_ms)s,
@@ -205,7 +246,7 @@ def _insert_database_record(record: dict[str, Any]) -> None:
                     %(error_type)s
                 )
                 """,
-                record,
+                {"caso_id": None, **record},
             )
 
 

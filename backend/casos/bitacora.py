@@ -6,6 +6,8 @@ import time
 from typing import Any, Callable, Protocol
 from urllib.parse import urlparse
 
+from telemetry.tracking import contexto_llamada
+
 TRANSICION = "transicion"
 SOLICITUD = "solicitud"
 LLAMADA_LLM = "llamada_llm"
@@ -87,10 +89,7 @@ class RegistrarEvento(Protocol):
 
 
 def equipo_de_cliente(client: Any) -> str | None:
-    """Equipo que ejecuta la inferencia: el host de la URL del agente.
-
-    Provisional hasta que exista el registro de agentes (B7).
-    """
+    """Equipo que ejecuta la inferencia: el host de la URL del agente (B7)."""
     base_url = getattr(client, "base_url", None)
     if not base_url:
         return None
@@ -116,7 +115,8 @@ def llamar_llm(
     equipo = equipo_de_cliente(client)
     inicio = reloj()
     try:
-        respuesta = client.generate(system=system, prompt=prompt, temperature=temperature)
+        with contexto_llamada(caso_id, agente):  # telemetry.llm_calls queda ligada al caso
+            respuesta = client.generate(system=system, prompt=prompt, temperature=temperature)
     except Exception as exc:
         registrar(caso_id, LLAMADA_LLM, {
             "agente": agente,

@@ -78,8 +78,8 @@ class AlmacenLocalTest(unittest.TestCase):
         with patch.dict(os.environ, {"REPORTES_ALMACEN": "local",
                                      "REPORTES_DIR": self.tmp.name}):
             self.assertIsInstance(almacen_desde_entorno(), AlmacenLocal)
-        with patch.dict(os.environ, {"REPORTES_ALMACEN": "s3"}):
-            with self.assertRaisesRegex(RuntimeError, "B8"):
+        with patch.dict(os.environ, {"REPORTES_ALMACEN": "desconocido"}):
+            with self.assertRaises(RuntimeError):
                 almacen_desde_entorno()
 
 
@@ -130,6 +130,19 @@ class GuardarReporteTest(unittest.TestCase):
             self.repo.transitar(self.caso_id, estado, None)
         with self.assertRaises(CasoCerrado):
             guardar_reporte(self.repo, self.almacen, self.caso_id, PDF, "pdf")
+
+    def test_guardados_simultaneos_no_se_pisan(self):
+        """B10: varios reportes del mismo caso a la vez reciben versiones distintas."""
+        from concurrent.futures import ThreadPoolExecutor
+        caso_id = self.repo.crear("concurrente")["id"]
+        contenidos = [f"# Reporte {i}".encode() for i in range(6)]
+        with ThreadPoolExecutor(6) as pool:
+            list(pool.map(lambda c: guardar_reporte(self.repo, self.almacen, caso_id, c, "md"),
+                          contenidos))
+        reportes = self.repo.listar_reportes(caso_id)
+        self.assertEqual(sorted(r["version"] for r in reportes), list(range(1, 7)))
+        self.assertEqual(sorted(leer_reporte(self.almacen, r) for r in reportes), sorted(contenidos))
+        self.assertFalse(list(Path(self.tmp.name).rglob("*.tmp")))
 
     def test_detecta_archivo_alterado(self):
         r = guardar_reporte(self.repo, self.almacen, self.caso_id, PDF, "pdf")

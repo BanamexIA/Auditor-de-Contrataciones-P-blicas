@@ -42,20 +42,19 @@ def guardar_reporte(
     if not isinstance(contenido, bytes) or not contenido:
         raise FormatoInvalido("El reporte está vacío o no es bytes.")
 
-    version = repo.siguiente_version_reporte(caso_id)  # valida caso existente y no cerrado
     content_type = FORMATOS[formato]
-    uri = almacen.guardar(clave_reporte(caso_id, version, formato), contenido, content_type)
-    return repo.registrar_reporte(
-        caso_id=caso_id,
-        version=version,
-        uri=uri,
-        sha256=hashlib.sha256(contenido).hexdigest(),
-        formato=formato,
-        content_type=content_type,
-        tamano_bytes=len(contenido),
-        modelo=modelo,
-        equipo=equipo,
-    )
+    # Valida caso existente y no cerrado, y bloquea el caso hasta registrar (B10).
+    with repo.reservar_reporte(caso_id) as (version, registrar):
+        uri = almacen.guardar(clave_reporte(caso_id, version, formato), contenido, content_type)
+        return registrar(
+            uri=uri,
+            sha256=hashlib.sha256(contenido).hexdigest(),
+            formato=formato,
+            content_type=content_type,
+            tamano_bytes=len(contenido),
+            modelo=modelo,
+            equipo=equipo,
+        )
 
 
 def leer_reporte(almacen: AlmacenReportes, reporte: dict[str, Any]) -> bytes:

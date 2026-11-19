@@ -25,3 +25,4 @@ docs/reporte_calidad.md
 
 # Database dumps (contain project data)
 *.dump
+backups/

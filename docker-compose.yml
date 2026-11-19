@@ -10,6 +10,8 @@ services:
       ETL_USER_PASSWORD: ${ETL_USER_PASSWORD:?Set ETL_USER_PASSWORD in .env}
       AGENT_RO_USER: ${AGENT_RO_USER:-agent_ro}
       AGENT_RO_PASSWORD: ${AGENT_RO_PASSWORD:?Set AGENT_RO_PASSWORD in .env}
+      BACKEND_USER: ${BACKEND_USER:-backend_app}
+      BACKEND_PASSWORD: ${BACKEND_PASSWORD:?Set BACKEND_PASSWORD in .env}
     ports:
       - "127.0.0.1:${DB_PORT_HOST:-5432}:5432"
     volumes:
@@ -36,10 +38,19 @@ services:
       DB_HOST: ${DB_HOST:-db}
       DB_PORT: ${DB_PORT:-5432}
       DB_NAME: ${DB_NAME:-auditor_contrataciones}
-      DB_USER: ${DB_USER:-etl_user}
-      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      # El backend usa su propio rol (audit y telemetry); el SQL de los agentes, agent_ro.
+      DB_USER: ${BACKEND_USER:-backend_app}
+      DB_PASSWORD: ${BACKEND_PASSWORD:?Set BACKEND_PASSWORD in .env}
+      AGENT_RO_USER: ${AGENT_RO_USER:-agent_ro}
+      AGENT_RO_PASSWORD: ${AGENT_RO_PASSWORD:?Set AGENT_RO_PASSWORD in .env}
+      # Firma de los tokens de sesión (>= 32 caracteres). Sin él la API no arranca en Compose.
+      AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET in .env (python -c "import secrets; print(secrets.token_urlsafe(48))")}
+      AUTH_TOKEN_HORAS: ${AUTH_TOKEN_HORAS:-8}
       REPORTES_ALMACEN: ${REPORTES_ALMACEN:-local}
       REPORTES_DIR: /app/data/reportes
+      REPORTES_S3_BUCKET: ${REPORTES_S3_BUCKET:-}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AGENTES_VERIFICAR_CADA_S: ${AGENTES_VERIFICAR_CADA_S:-60}
     volumes:
       - reportes_data:/app/data/reportes
     ports:

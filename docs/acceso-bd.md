@@ -260,6 +260,32 @@ Rótala cuando alguien deje el equipo, cuando se filtre o al cerrar el semestre.
 3. Reinicia los servicios que usen `agent_ro` (`docker compose up -d`) y manda
    la contraseña nueva por privado a cada integrante.
 
+## Roles de la base
+
+| Rol | Lo usa | Puede | No puede |
+|---|---|---|---|
+| `postgres` | Administrador (migraciones) | Todo | — |
+| `etl_user` | ETL y benchmarks desde las laptops | Cargar `raw`, `staging`, `clean`, `rag`; escribir `telemetry` | `audit` (retirado en `17_revocar_audit_etl.sql`) |
+| `backend_app` | Contenedor del backend | Leer y escribir `audit` (casos, bitácora, señales, decisiones, reportes, agentes) e insertar `telemetry` | `clean`, `rag`, `raw`, `staging`; borrar en `audit` |
+| `agent_ro` | SQL generado por los agentes y el equipo (DBeaver) | `SELECT` en `clean` y `rag` | Escribir; `audit`. Desde el backend, además, cada sesión es de solo lectura y se corta a los 30 s |
+
+Variables: `BACKEND_USER`/`BACKEND_PASSWORD` (backend), `AGENT_RO_*` (agentes),
+`ETL_USER*` (ETL). En Compose el backend toma `DB_USER`/`DB_PASSWORD` de
+`BACKEND_*`; los `DB_*` del `.env` quedan para scripts que corren en la laptop.
+
+### Activar `backend_app` en una base existente (administrador)
+
+```bash
+# 1. En .env: BACKEND_USER=backend_app y BACKEND_PASSWORD=<contraseña nueva>
+sudo docker compose up -d db          # el contenedor de la BD lee las variables nuevas
+sudo docker compose exec -T db sh -c 'psql -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /opt/etl/sql/16_rol_backend.sql'
+sudo docker compose up -d --build backend
+curl -s localhost:5000/health/db      # connected
+sudo docker compose exec backend printenv DB_USER   # backend_app
+# 2. Solo cuando lo anterior funcione:
+sudo docker compose exec -T db sh -c 'psql -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /opt/etl/sql/17_revocar_audit_etl.sql'
+```
+
 ## Prueba de acceso
 
 Registro de compañeros que ya se conectaron desde fuera de la red de la EC2
