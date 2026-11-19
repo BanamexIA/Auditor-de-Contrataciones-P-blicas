@@ -46,6 +46,7 @@ services:
       # Firma de los tokens de sesión (>= 32 caracteres). Sin él la API no arranca en Compose.
       AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET in .env (python -c "import secrets; print(secrets.token_urlsafe(48))")}
       AUTH_TOKEN_HORAS: ${AUTH_TOKEN_HORAS:-8}
+      CORS_ORIGENES: ${CORS_ORIGENES:-http://localhost:8080}
       REPORTES_ALMACEN: ${REPORTES_ALMACEN:-local}
       REPORTES_DIR: /app/data/reportes
       REPORTES_S3_BUCKET: ${REPORTES_S3_BUCKET:-}

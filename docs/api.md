@@ -28,6 +28,7 @@ cada endpoint están en [`docs/contratos/`](contratos/README.md).
 | `GET` | [`/casos/<id>/reportes/<version>/enlace`](#get-casosidreportesversionenlace) | URL temporal del reporte para un `<iframe>` | Front |
 | `GET` | [`/casos/<id>/reportes/<version>/archivo`](#get-casosidreportesversionarchivo) | Descargar un reporte | Front |
 | `GET` | [`/casos/<id>/telemetria`](#get-casosidtelemetria) | Tokens y latencia del modelo en el caso (B9) | Front, evaluación |
+| `POST` | [`/demo/preguntar`](#post-demopreguntar) | Demo: el Agente Consulta contesta una pregunta | Front de demo |
 | `GET` | [`/agentes`](#get-agentes) | Laptops con Ollama registradas y su estado | Front, monitoreo |
 | `GET` | [`/agentes/<agente_id>`](#get-agentesagente_id) | Ver un agente | Front, monitoreo |
 | `POST` | [`/agentes/<agente_id>/verificar`](#post-agentesagente_idverificar) | Verificar ahora si un agente responde | Front, administrador |
@@ -305,6 +306,23 @@ Descarga el archivo. Para mostrar el PDF en el front basta con un
   pide `/archivo` cada vez.
 - **404** `reporte_no_encontrado` · **500** `reporte_corrupto` ·
   **503** `almacen_no_disponible` (S3 no responde o vencieron las credenciales del laboratorio).
+
+## `POST /demo/preguntar`
+
+Solo para la demo, mientras no existe el orquestador. Crea un caso con la pregunta, corre el
+Agente Consulta en la laptop disponible y espera la respuesta (con `qwen2.5:7b`, de 10 a 60 s).
+El caso queda en `consultado`, o en `bloqueado` con el motivo.
+
+```json
+{"pregunta": "Lista 10 contratos de 2026 con proveedores en el 69-B"}
+```
+
+Respuesta `200` con `tipo: "sql"`: `caso_id`, `sql`, `supuestos`, `equipo`, `modelo`,
+`total_filas` y `filas` (hasta 200). Si el agente pide aclarar o no hay datos, también es `200`,
+con `tipo: "bloqueado"`, `codigo: "sin_respuesta"` y `motivo`. Sin laptop disponible: `503`
+(`agente_no_disponible`); si el modelo falla: `502` (`agente_fallo`).
+
+CORS: los orígenes permitidos van en `CORS_ORIGENES` (por defecto `http://localhost:8080`).
 
 ## `GET /casos/<id>/telemetria`
 
