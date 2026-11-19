@@ -257,9 +257,11 @@ Descarga el archivo. Para mostrar el PDF en el front basta con un
 
 - **200** con el archivo (almacén local), `Content-Type` del reporte y
   `Content-Disposition: inline; filename="reporte_<id>_v1.pdf"`.
-- **302** a una URL temporal de S3 (cuando se active B8). El navegador sigue la
-  redirección solo; con `fetch` también.
-- **404** `reporte_no_encontrado` · **500** `reporte_corrupto`.
+- **302** a una URL prefirmada de S3 válida 5 minutos (`REPORTES_ALMACEN=s3`).
+  El navegador sigue la redirección solo; con `fetch` también. No guardes la URL:
+  pide `/archivo` cada vez.
+- **404** `reporte_no_encontrado` · **500** `reporte_corrupto` ·
+  **503** `almacen_no_disponible` (S3 no responde o vencieron las credenciales del laboratorio).
 
 ## `GET /agentes`
 

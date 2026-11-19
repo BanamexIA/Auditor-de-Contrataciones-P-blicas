@@ -11,7 +11,7 @@ from sqlalchemy.exc import OperationalError
 from backend.casos.decisiones import CasoCerrado, DecisionInvalida, SenalNoEncontrada
 from backend.casos.estados import ESTADOS, TransicionInvalida
 from backend.casos.repositorio import CasoNoEncontrado, RepositorioCasos, ReporteNoEncontrado
-from backend.reportes.almacen import ArchivoNoEncontrado
+from backend.reportes.almacen import AlmacenNoDisponible, ArchivoNoEncontrado
 from backend.reportes.servicio import ReporteCorrupto, leer_reporte
 
 LIMITE_DEFECTO = 50
@@ -151,11 +151,15 @@ def archivo_reporte(caso_id: str, version: int):
         return _error(404, "reporte_no_encontrado",
                       f"No existe la versión {version} del reporte del caso {caso_id}.")
     almacen = current_app.extensions["almacen_reportes"]
-    url = almacen.url_descarga(reporte["uri"])
-    if url:
-        return redirect(url, code=302)
     try:
+        url = almacen.url_descarga(reporte["uri"])
+        if url:
+            return redirect(url, code=302)
         contenido = leer_reporte(almacen, reporte)
+    except AlmacenNoDisponible:
+        current_app.logger.exception("Almacén no disponible: %s", reporte["uri"])
+        return _error(503, "almacen_no_disponible",
+                      "El almacén de reportes no responde. Intenta más tarde.")
     except (ReporteCorrupto, ArchivoNoEncontrado):
         current_app.logger.exception("Reporte ilegible: %s", reporte["uri"])
         return _error(500, "reporte_corrupto",

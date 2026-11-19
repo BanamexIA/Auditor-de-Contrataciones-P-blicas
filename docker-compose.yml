@@ -40,6 +40,8 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
       REPORTES_ALMACEN: ${REPORTES_ALMACEN:-local}
       REPORTES_DIR: /app/data/reportes
+      REPORTES_S3_BUCKET: ${REPORTES_S3_BUCKET:-}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
       AGENTES_VERIFICAR_CADA_S: ${AGENTES_VERIFICAR_CADA_S:-60}
     volumes:
       - reportes_data:/app/data/reportes

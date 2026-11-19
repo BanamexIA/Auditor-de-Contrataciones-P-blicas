@@ -78,8 +78,8 @@ class AlmacenLocalTest(unittest.TestCase):
         with patch.dict(os.environ, {"REPORTES_ALMACEN": "local",
                                      "REPORTES_DIR": self.tmp.name}):
             self.assertIsInstance(almacen_desde_entorno(), AlmacenLocal)
-        with patch.dict(os.environ, {"REPORTES_ALMACEN": "s3"}):
-            with self.assertRaisesRegex(RuntimeError, "B8"):
+        with patch.dict(os.environ, {"REPORTES_ALMACEN": "desconocido"}):
+            with self.assertRaises(RuntimeError):
                 almacen_desde_entorno()
 
 
