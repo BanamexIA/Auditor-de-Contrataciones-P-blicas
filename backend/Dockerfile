@@ -10,6 +10,10 @@ COPY backend ./backend
 COPY llm ./llm
 COPY telemetry ./telemetry
 COPY agents ./agents
+COPY agente_deteccion ./agente_deteccion
+COPY agente_reporte/agente_reporte ./agente_reporte
+COPY rag ./rag
+COPY etl ./etl
 
 EXPOSE 5000
 HEALTHCHECK --interval=10s --timeout=5s --retries=5 --start-period=10s \
