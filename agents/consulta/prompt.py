@@ -4,10 +4,13 @@ import json
 import re
 from typing import Any, Sequence
 
-from agents.consulta.validator import MAX_SQL_ROWS, validate_sql
+from agents.consulta.validator import MAX_SQL_ROWS, add_missing_limit, validate_sql
 
 
 RESPONSE_TYPES = ("sql", "aclaracion", "sin_datos")
+LIMIT_ADDED_NOTE = (
+    f"La consulta no traía LIMIT; el sistema agregó LIMIT {MAX_SQL_ROWS}, el máximo permitido."
+)
 
 # Rules distilled from docs/capa_semantica.md; keep both in sync.
 DATA_RULES = """Reglas de los datos:
@@ -149,11 +152,15 @@ def parse_response(text: str) -> dict[str, Any]:
             f"'tipo' debe ser uno de {', '.join(RESPONSE_TYPES)}; se recibió {response_type!r}."
         )
     if response_type == "sql":
+        sql, limit_added = add_missing_limit(_required_text(payload, "sql"))
+        supuestos = _text_list(payload, "supuestos")
+        if limit_added:
+            supuestos.append(LIMIT_ADDED_NOTE)
         return {
             "tipo": "sql",
-            "sql": validate_sql(_required_text(payload, "sql")),
+            "sql": validate_sql(sql),
             "filtros": _text_list(payload, "filtros"),
-            "supuestos": _text_list(payload, "supuestos"),
+            "supuestos": supuestos,
         }
     if response_type == "aclaracion":
         return {

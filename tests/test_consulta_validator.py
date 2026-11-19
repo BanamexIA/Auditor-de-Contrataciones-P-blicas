@@ -7,6 +7,7 @@ import yaml
 from agents.consulta.validator import (
     MAX_SQL_ROWS,
     SQLValidationError,
+    add_missing_limit,
     extract_sql,
     is_single_select,
     validate_sql,
@@ -153,6 +154,56 @@ class RejectedQueriesTests(unittest.TestCase):
         self.assert_rejected(f"SELECT * FROM {CONTRATOS} LIMIT 0", "entre 1 y 200")
         self.assert_rejected(f"SELECT * FROM {CONTRATOS} LIMIT {MAX_SQL_ROWS + 1}", "entre 1 y 200")
         self.assert_rejected(f"SELECT * FROM {CONTRATOS} LIMIT 5.5", "entero literal")
+
+
+class AddMissingLimitTests(unittest.TestCase):
+    """A5, mejora 1: a SELECT without LIMIT gets one instead of a retry."""
+
+    def test_adds_the_maximum_limit_and_the_result_passes_the_validator(self):
+        query, added = add_missing_limit(f"SELECT fuente, COUNT(*) FROM {CONTRATOS} GROUP BY fuente")
+        self.assertTrue(added)
+        self.assertTrue(query.endswith(f"LIMIT {MAX_SQL_ROWS}"))
+        validate_sql(query)
+
+    def test_keeps_order_by_and_places_the_limit_before_offset(self):
+        query, added = add_missing_limit(f"SELECT * FROM {CONTRATOS} ORDER BY fecha_inicio DESC OFFSET 5")
+        self.assertTrue(added)
+        self.assertIn(f"ORDER BY fecha_inicio DESC LIMIT {MAX_SQL_ROWS} OFFSET 5", query)
+        validate_sql(query)
+
+    def test_a_limit_inside_a_subquery_does_not_count(self):
+        query, added = add_missing_limit(
+            f"SELECT * FROM (SELECT * FROM {CONTRATOS} LIMIT 5) AS t"
+        )
+        self.assertTrue(added)
+        self.assertTrue(query.endswith(f"LIMIT {MAX_SQL_ROWS}"))
+
+    def test_leaves_an_existing_limit_alone_even_if_it_is_invalid(self):
+        for query in (
+            f"SELECT * FROM {CONTRATOS} LIMIT 20",
+            f"SELECT * FROM {CONTRATOS} LIMIT {MAX_SQL_ROWS + 1}",
+            f"SELECT * FROM {CONTRATOS} LIMIT ALL",
+            f"SELECT * FROM {CONTRATOS} LIMIT '5'",
+            f"SELECT * FROM {CONTRATOS} FETCH FIRST 5 ROWS ONLY",
+        ):
+            with self.subTest(query=query):
+                self.assertEqual(add_missing_limit(query), (query, False))
+
+    def test_leaves_anything_that_is_not_a_single_select_alone(self):
+        for query in (
+            f"DELETE FROM {CONTRATOS}",
+            f"SELECT * FROM {CONTRATOS}; DROP TABLE clean.contratos",
+            f"SELECT fuente FROM {CONTRATOS} UNION SELECT fuente FROM {CONTRATOS}",
+            "SELECT FROM WHERE",
+        ):
+            with self.subTest(query=query):
+                self.assertEqual(add_missing_limit(query), (query, False))
+
+    def test_the_other_rules_still_apply_after_adding_the_limit(self):
+        query, added = add_missing_limit("SELECT * FROM clean.contratos")
+        self.assertTrue(added)
+        with self.assertRaisesRegex(SQLValidationError, "Tabla no permitida"):
+            validate_sql(query)
 
 
 class ExtractSqlTests(unittest.TestCase):

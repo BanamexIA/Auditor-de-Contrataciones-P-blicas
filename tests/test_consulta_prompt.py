@@ -6,6 +6,7 @@ import yaml
 
 from agents.consulta.prompt import (
     BUILT_IN_EXAMPLES,
+    LIMIT_ADDED_NOTE,
     ResponseFormatError,
     build_system_prompt,
     build_user_prompt,
@@ -82,6 +83,20 @@ class ParseResponseTests(unittest.TestCase):
             "opciones": ["2024", "2026"],
         }))
         self.assertEqual(response["opciones"], ["2024", "2026"])
+
+    def test_sql_without_limit_gets_one_and_a_note(self):
+        response = parse_response(json.dumps({
+            "tipo": "sql",
+            "sql": "SELECT fuente, COUNT(*) AS contratos FROM clean.v_contratos_agente GROUP BY fuente",
+            "supuestos": ["Supuesto del modelo."],
+        }))
+        self.assertTrue(response["sql"].endswith(f"LIMIT {MAX_SQL_ROWS}"))
+        self.assertEqual(response["supuestos"], ["Supuesto del modelo.", LIMIT_ADDED_NOTE])
+
+    def test_sql_with_its_own_limit_gets_no_note(self):
+        response = parse_response(json.dumps({"tipo": "sql", "sql": VALID_SQL}))
+        self.assertTrue(response["sql"].endswith("LIMIT 20"))
+        self.assertNotIn(LIMIT_ADDED_NOTE, response["supuestos"])
 
     def test_sql_that_fails_the_validator_is_rejected(self):
         with self.assertRaisesRegex(SQLValidationError, "Tabla no permitida"):

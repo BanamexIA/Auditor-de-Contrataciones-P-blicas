@@ -48,6 +48,26 @@ def extract_sql(response: str) -> str:
     return candidate
 
 
+def add_missing_limit(query: str, max_rows: int = MAX_SQL_ROWS) -> tuple[str, bool]:
+    """Adds LIMIT max_rows to a single SELECT that has none.
+
+    Returns the query and whether a LIMIT was added. Anything else (invalid SQL,
+    several statements, a statement that is not SELECT, or a LIMIT or FETCH that
+    is already there, valid or not) comes back unchanged so validate_sql can
+    reject it with its usual message.
+    """
+    try:
+        statements = sqlglot.parse(query, read="postgres")
+    except sqlglot.errors.ParseError:
+        return query, False
+    if len(statements) != 1 or not isinstance(statements[0], exp.Select):
+        return query, False
+    tree = statements[0]
+    if tree.args.get("limit") is not None:
+        return query, False
+    return tree.limit(max_rows).sql(dialect="postgres"), True
+
+
 def validate_sql(query: str, max_rows: int = MAX_SQL_ROWS) -> str:
     try:
         statements = sqlglot.parse(query, read="postgres")

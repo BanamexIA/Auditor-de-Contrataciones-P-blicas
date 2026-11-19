@@ -3,6 +3,7 @@ import unittest
 
 from agents.consulta.agent import MAX_ATTEMPTS, answer_question
 from agents.consulta.coverage import Coverage
+from agents.consulta.prompt import LIMIT_ADDED_NOTE
 from llm.base import LLMClient, LLMResponse
 
 
@@ -49,6 +50,17 @@ class AnswerQuestionTests(unittest.TestCase):
         self.assertEqual(result["tipo"], "sql")
         self.assertEqual(result["intentos"], 2)
         self.assertIn("Tabla no permitida", client.prompts[1])
+
+    def test_missing_limit_is_added_without_a_retry(self):
+        client = FakeClient(
+            sql_answer("SELECT fuente, COUNT(*) AS contratos FROM clean.v_contratos_agente GROUP BY fuente")
+        )
+        result = ask(client)
+        self.assertEqual(result["tipo"], "sql")
+        self.assertEqual(result["intentos"], 1)
+        self.assertEqual(len(client.prompts), 1)
+        self.assertTrue(result["sql"].endswith("LIMIT 200"))
+        self.assertIn(LIMIT_ADDED_NOTE, result["supuestos"])
 
     def test_returns_error_after_the_retry_fails(self):
         client = FakeClient("no es JSON", "tampoco")

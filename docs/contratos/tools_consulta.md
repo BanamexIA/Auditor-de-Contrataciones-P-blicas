@@ -20,6 +20,7 @@ laptop solo ejecuta el modelo y nunca recibe credenciales de la base.
 
 - **Tools 1 y 4** viven hoy en `eval/run_benchmark.py`; se mueven a `agents/consulta/` en A3. Usan el rol `agent_ro`, una transacción de solo lectura y un límite de 60 s.
 - **Tool 2** llama a las tools 3 y +1 por dentro. No ejecuta SQL.
+- **Si el SQL del modelo no trae `LIMIT`**, la tool 2 le agrega `LIMIT 200` antes de validarlo y lo anota en `supuestos`, en lugar de gastar el reintento. Un `LIMIT` que sí viene pero no es válido (mayor a 200, `ALL`, texto o `FETCH`) se sigue rechazando. La tool +1 no cambia: sigue exigiendo el `LIMIT`, así que la tool 4 y el benchmark se comportan igual.
 - **Tool 4** vuelve a validar el SQL antes de ejecutarlo.
 - **La cobertura** se carga una vez al arrancar el backend con `COVERAGE_QUERY` (`agents/consulta/coverage.py`), que es la métrica M9 de `docs/capa_semantica.md`.
 - **El prompt de sistema** se arma una vez al arrancar con `build_system_prompt(schema_context(), ejemplos)` de `agents/consulta/prompt.py`. El benchmark tiene otra función con el mismo nombre que solo pide SQL; no es la del agente.
