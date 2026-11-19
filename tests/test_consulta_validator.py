@@ -6,6 +6,7 @@ import yaml
 
 from agents.consulta.validator import (
     MAX_SQL_ROWS,
+    VIEW_COLUMNS,
     SQLValidationError,
     add_missing_limit,
     extract_sql,
@@ -154,6 +155,75 @@ class RejectedQueriesTests(unittest.TestCase):
         self.assert_rejected(f"SELECT * FROM {CONTRATOS} LIMIT 0", "entre 1 y 200")
         self.assert_rejected(f"SELECT * FROM {CONTRATOS} LIMIT {MAX_SQL_ROWS + 1}", "entre 1 y 200")
         self.assert_rejected(f"SELECT * FROM {CONTRATOS} LIMIT 5.5", "entero literal")
+
+
+class ColumnTests(unittest.TestCase):
+    """A5, mejora 3: a column is checked against the view where the query looks for it."""
+
+    def assert_rejected(self, query, *fragments):
+        with self.assertRaises(SQLValidationError) as caught:
+            validate_sql(query)
+        for fragment in fragments:
+            self.assertIn(fragment, str(caught.exception))
+
+    def test_q07_column_in_the_wrong_view_points_to_the_join(self):
+        # The SQL the model wrote for q07 on 2026-11-17; PostgreSQL rejected it.
+        self.assert_rejected(
+            f"SELECT fuente, COUNT(*) AS coincidencias FROM {CONTRATOS} "
+            f"WHERE fuente IN ('comprasmx', 'historico') AND rfc_exacto = 'S' "
+            f"GROUP BY fuente ORDER BY coincidencias DESC, fuente LIMIT 50",
+            "rfc_exacto", f"está en {COINCIDENCIAS}", "JOIN por codigo_contrato",
+        )
+
+    def test_alias_of_the_wrong_view(self):
+        self.assert_rejected(f"SELECT c.rfc_exacto FROM {CONTRATOS} AS c LIMIT 5", "rfc_exacto", COINCIDENCIAS)
+        self.assert_rejected(
+            f"SELECT c.rfc_exacto FROM {CONTRATOS} AS c JOIN {COINCIDENCIAS} AS m "
+            f"ON m.codigo_contrato = c.codigo_contrato LIMIT 5",
+            f"solo está en {COINCIDENCIAS}", "alias",
+        )
+
+    def test_column_that_exists_in_no_view(self):
+        self.assert_rejected(f"SELECT monto FROM {CONTRATOS} LIMIT 5", "monto", "no existe")
+
+    def test_unqualified_column_present_in_both_joined_views(self):
+        self.assert_rejected(
+            f"SELECT proveedor FROM {CONTRATOS} AS c JOIN {COINCIDENCIAS} AS m "
+            f"ON m.codigo_contrato = c.codigo_contrato LIMIT 5",
+            "proveedor", "las dos vistas",
+        )
+
+    def test_accepts_valid_ways_to_name_columns(self):
+        for query in (
+            # Unqualified column that exists in only one of the joined views.
+            f"SELECT fuente, COUNT(*) FROM {CONTRATOS} AS c JOIN {COINCIDENCIAS} AS m "
+            f"ON m.codigo_contrato = c.codigo_contrato WHERE rfc_exacto GROUP BY fuente LIMIT 20",
+            # Output aliases in GROUP BY and ORDER BY, and the view name as qualifier.
+            f"SELECT EXTRACT(YEAR FROM fecha_inicio)::integer AS anio, COUNT(*) AS n FROM {CONTRATOS} "
+            f"GROUP BY anio ORDER BY n DESC LIMIT 20",
+            f"SELECT v_contratos_agente.fuente FROM {CONTRATOS} LIMIT 1",
+            # Columns of a subquery and a correlated subquery.
+            f"SELECT fuente, total FROM (SELECT fuente, COUNT(*) AS total FROM {CONTRATOS} "
+            f"GROUP BY fuente) AS t LIMIT 5",
+            f"SELECT c.codigo_contrato FROM {CONTRATOS} AS c WHERE EXISTS (SELECT 1 FROM {COINCIDENCIAS} AS m "
+            f"WHERE m.codigo_contrato = c.codigo_contrato AND m.rfc_exacto) LIMIT 5",
+            f"SELECT fuente, ROW_NUMBER() OVER (PARTITION BY fuente ORDER BY importe DESC) AS rn "
+            f"FROM {CONTRATOS} LIMIT 5",
+        ):
+            with self.subTest(query=query[:70]):
+                validate_sql(query)
+
+    def test_column_list_matches_the_view_definitions(self):
+        definitions = {}
+        for path in sorted((ROOT / "etl" / "sql").glob("*.sql")):
+            text = path.read_text(encoding="utf-8")
+            for view, body in re.findall(
+                r"CREATE OR REPLACE VIEW clean\.(\w+) AS\s*SELECT(.*?)\bFROM\b", text, flags=re.DOTALL | re.IGNORECASE
+            ):
+                definitions[view.lower()] = tuple(column.strip() for column in body.split(","))
+        for view, columns in VIEW_COLUMNS.items():
+            with self.subTest(vista=view):
+                self.assertEqual(definitions[view], columns)
 
 
 class AddMissingLimitTests(unittest.TestCase):

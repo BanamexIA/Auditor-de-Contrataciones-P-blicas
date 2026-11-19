@@ -4,12 +4,33 @@ import re
 
 import sqlglot
 from sqlglot import exp
+from sqlglot.errors import OptimizeError
+from sqlglot.optimizer.qualify import qualify
 
 
-ALLOWED_TABLES = {
-    "v_contratos_agente",
-    "v_coincidencias_69b_agente",
+# Columns of the approved views, as defined in etl/sql/07_fase4b_transform.sql.
+# tests/test_consulta_validator.py fails if the SQL and this list drift apart.
+VIEW_COLUMNS = {
+    "v_contratos_agente": (
+        "codigo_contrato", "codigo_expediente", "fuente", "proveedor", "proveedor_normalizado",
+        "titulo_contrato", "descripcion_contrato", "tipo_contratacion", "tipo_expediente",
+        "tipo_procedimiento", "tipo_procedimiento_norm", "tipo_procedimiento_estado", "ley",
+        "contract_type", "importe", "moneda", "fecha_inicio", "fecha_fin", "fecha_inicio_estado",
+        "fecha_inicio_valida", "fecha_inicio_futura", "fecha_fin_antes_inicio", "institucion",
+        "clave_institucion", "siglas_de_la_institucion", "tipo_de_institucion", "clave_ramo",
+        "descripcion_ramo", "clave_de_la_uc", "nombre_de_la_uc", "numero_de_procedimiento",
+        "caracter_del_procedimiento", "articulo_de_excepcion", "descripcion_excepcion",
+        "_source_file",
+    ),
+    "v_coincidencias_69b_agente": (
+        "codigo_contrato", "rfc_exacto", "nombre_normalizado_exacto", "nivel_confianza",
+        "requiere_revision_humana", "proveedor", "rfc", "nombre_del_contribuyente", "created_at",
+    ),
 }
+ALLOWED_TABLES = set(VIEW_COLUMNS)
+# Only the names matter for checking columns; the types are not used.
+_SCHEMA = {"clean": {view: {column: "TEXT" for column in columns} for view, columns in VIEW_COLUMNS.items()}}
+_COLUMN_IN_ERROR = re.compile(r"Column '([^']+)' could not be resolved|Unknown column: (\S+)")
 MAX_SQL_ROWS = 200
 QUERY_TIMEOUT_MS = 60_000
 
@@ -109,7 +130,48 @@ def validate_sql(query: str, max_rows: int = MAX_SQL_ROWS) -> str:
         raise SQLValidationError("El LIMIT debe ser un entero literal.") from exc
     if not 1 <= row_limit <= max_rows:
         raise SQLValidationError(f"El LIMIT debe estar entre 1 y {max_rows}.")
+    # Last, so every earlier rule keeps its own message (LIMIT ALL is not a column).
+    _check_columns(tree, {table.name.lower() for table in tables})
     return tree.sql(dialect="postgres")
+
+
+def _check_columns(tree: exp.Select, views_in_query: set[str]) -> None:
+    """Rejects a column that does not exist in the view where the query looks for it.
+
+    sqlglot resolves every column against VIEW_COLUMNS, following aliases and
+    subqueries, so the model learns about a misplaced column before PostgreSQL
+    runs the query.
+    """
+    try:
+        qualify(tree.copy(), schema=_SCHEMA, dialect="postgres", validate_qualify_columns=True,
+                quote_identifiers=False, identify=False)
+    except OptimizeError as exc:
+        match = _COLUMN_IN_ERROR.search(str(exc))
+        if not match:
+            raise SQLValidationError(f"La consulta usa columnas que no se pudieron resolver: {exc}") from exc
+        column = (match.group(1) or match.group(2)).strip('"').lower()
+        raise SQLValidationError(_column_message(column, views_in_query)) from exc
+    except sqlglot.errors.SqlglotError as exc:
+        raise SQLValidationError(f"No se pudieron revisar las columnas de la consulta: {exc}") from exc
+
+
+def _column_message(column: str, views_in_query: set[str]) -> str:
+    homes = [view for view, columns in VIEW_COLUMNS.items() if column in columns]
+    if not homes:
+        return f"La columna {column} no existe en las vistas aprobadas. Usa solo las columnas de la lista."
+    if len(homes) > 1:
+        return (
+            f"La columna {column} está en las dos vistas; antepón el alias de la vista que quieres "
+            f"(por ejemplo c.{column} o m.{column})."
+        )
+    home = homes[0]
+    if home not in views_in_query:
+        others = ", ".join(f"clean.{view}" for view in sorted(views_in_query))
+        return (
+            f"La columna {column} no está en {others}: está en clean.{home}. "
+            f"Une las dos vistas con JOIN por codigo_contrato y usa la columna con el alias de clean.{home}."
+        )
+    return f"La columna {column} solo está en clean.{home}; úsala con el alias de esa vista."
 
 
 def is_single_select(query: str) -> bool:

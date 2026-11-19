@@ -53,7 +53,12 @@ def ask(client, question="¿Cuántos contratos hay?", clarifications=(), execute
 
 
 ROWS = [{"fuente": "comprasmx", "contratos": 84676}]
-BAD_COLUMN_SQL = "SELECT COUNT(*) FROM clean.v_contratos_agente WHERE rfc_exacto LIMIT 1"
+# Passes the validator but PostgreSQL rejects it, like q08 on 2026-11-17.
+GROUPING_SQL = (
+    "SELECT c.*, COUNT(*) AS contratos FROM clean.v_contratos_agente AS c "
+    "GROUP BY c.codigo_contrato LIMIT 20"
+)
+GROUPING_ERROR = 'column "c.codigo_expediente" must appear in the GROUP BY clause'
 
 
 class AnswerQuestionTests(unittest.TestCase):
@@ -140,31 +145,41 @@ class ExecutionRetryTests(unittest.TestCase):
         self.assertEqual(execute.queries, [result["sql"]])
 
     def test_a_database_rejection_is_retried_with_the_sql_and_the_error(self):
-        client = FakeClient(sql_answer(BAD_COLUMN_SQL), sql_answer(VALID_SQL))
-        execute = FakeExecutor(pg_errors.UndefinedColumn('column "rfc_exacto" does not exist'), ROWS)
+        client = FakeClient(sql_answer(GROUPING_SQL), sql_answer(VALID_SQL))
+        execute = FakeExecutor(pg_errors.GroupingError(GROUPING_ERROR), ROWS)
         result = ask(client, execute=execute)
         self.assertEqual(result["tipo"], "sql")
         self.assertEqual(result["intentos"], 2)
         self.assertEqual(result["filas"], ROWS)
-        self.assertIn('PostgreSQL rechazó la consulta: column "rfc_exacto" does not exist', client.prompts[1])
-        self.assertIn("rfc_exacto LIMIT 1", client.prompts[1])
+        self.assertIn(f"PostgreSQL rechazó la consulta: {GROUPING_ERROR}", client.prompts[1])
+        self.assertIn("SELECT c.*", client.prompts[1])
         self.assertEqual(len(execute.queries), 2)
 
     def test_a_second_rejection_returns_error_with_the_rejected_sql(self):
-        client = FakeClient(sql_answer(BAD_COLUMN_SQL), sql_answer(BAD_COLUMN_SQL))
-        execute = FakeExecutor(
-            pg_errors.GroupingError("must appear in the GROUP BY clause"),
-            pg_errors.GroupingError("must appear in the GROUP BY clause"),
-        )
+        client = FakeClient(sql_answer(GROUPING_SQL), sql_answer(GROUPING_SQL))
+        execute = FakeExecutor(pg_errors.GroupingError(GROUPING_ERROR), pg_errors.GroupingError(GROUPING_ERROR))
         result = ask(client, execute=execute)
         self.assertEqual(result["tipo"], "error")
         self.assertEqual(result["intentos"], MAX_ATTEMPTS)
         self.assertIn("PostgreSQL rechazó la consulta", result["motivo"])
-        self.assertIn("rfc_exacto", result["sql_rechazado"])
+        self.assertIn("SELECT c.*", result["sql_rechazado"])
+
+    def test_a_misplaced_column_is_caught_before_the_database(self):
+        # A5, mejora 3: q07's mistake no longer reaches PostgreSQL.
+        client = FakeClient(
+            sql_answer("SELECT COUNT(*) FROM clean.v_contratos_agente WHERE rfc_exacto LIMIT 1"),
+            sql_answer(VALID_SQL),
+        )
+        execute = FakeExecutor(ROWS)
+        result = ask(client, execute=execute)
+        self.assertEqual(result["tipo"], "sql")
+        self.assertEqual(result["intentos"], 2)
+        self.assertIn("JOIN por codigo_contrato", client.prompts[1])
+        self.assertEqual(len(execute.queries), 1)
 
     def test_a_format_error_after_a_rejection_does_not_keep_the_rejected_sql(self):
-        client = FakeClient(sql_answer(BAD_COLUMN_SQL), "no es JSON")
-        execute = FakeExecutor(pg_errors.UndefinedColumn('column "rfc_exacto" does not exist'))
+        client = FakeClient(sql_answer(GROUPING_SQL), "no es JSON")
+        execute = FakeExecutor(pg_errors.GroupingError(GROUPING_ERROR))
         result = ask(client, execute=execute)
         self.assertEqual(result["tipo"], "error")
         self.assertNotIn("sql_rechazado", result)
