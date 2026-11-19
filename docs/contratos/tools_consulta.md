@@ -19,7 +19,7 @@ laptop solo ejecuta el modelo y nunca recibe credenciales de la base.
 | +1 | Validar SQL | `validate_sql(sql)` | Determinista | SQL | SQL normalizado | `SQLValidationError` con un motivo legible |
 
 - **Tools 1 y 4** viven hoy en `eval/run_benchmark.py`; se mueven a `agents/consulta/` en A3. Usan el rol `agent_ro`, una transacción de solo lectura y un límite de 60 s.
-- **Tool 2** llama a las tools 3 y +1 por dentro. No ejecuta SQL.
+- **Tool 2** llama a las tools 3 y +1 por dentro. Sin `execute` no ejecuta SQL. Con `execute` (la tool 4) también ejecuta el SQL que pasó la cobertura; si PostgreSQL lo rechaza (columna inexistente, `GROUP BY` mal armado, fecha inválida…), le pasa al modelo el SQL y el error de la base en el mismo y único reintento. Los errores de conexión y el límite de 60 s no se reintentan: se propagan.
 - **Si el SQL del modelo no trae `LIMIT`**, la tool 2 le agrega `LIMIT 200` antes de validarlo y lo anota en `supuestos`, en lugar de gastar el reintento. Un `LIMIT` que sí viene pero no es válido (mayor a 200, `ALL`, texto o `FETCH`) se sigue rechazando. La tool +1 no cambia: sigue exigiendo el `LIMIT`, así que la tool 4 y el benchmark se comportan igual.
 - **Tool 4** vuelve a validar el SQL antes de ejecutarlo.
 - **La cobertura** se carga una vez al arrancar el backend con `COVERAGE_QUERY` (`agents/consulta/coverage.py`), que es la métrica M9 de `docs/capa_semantica.md`.
@@ -34,6 +34,7 @@ laptop solo ejecuta el modelo y nunca recibe credenciales de la base.
 | `client` | cliente LLM (`llm/`) | Apunta a la laptop del auditor (`AGENT_BASE_URL`) |
 | `system_prompt` | texto | El armado al arrancar |
 | `coverage` | `Coverage` | La cargada al arrancar |
+| `execute` | función `sql → filas`, opcional | La tool 4 (o una envoltura que además registre en la bitácora). Si se pasa, la tool 2 ejecuta y reintenta ante un rechazo de PostgreSQL |
 
 ## Salida de la tool 2
 
@@ -41,10 +42,10 @@ Siempre es un objeto con `tipo` e `intentos` (1 o 2).
 
 | `tipo` | Campos | Significa |
 |---|---|---|
-| `sql` | `sql`, `filtros`, `supuestos` | Hay un SQL validado y con cobertura, listo para la tool 4 |
+| `sql` | `sql`, `filtros`, `supuestos`; `filas` si se pasó `execute` | Hay un SQL validado y con cobertura, listo para la tool 4, o ya ejecutado |
 | `aclaracion` | `pregunta`, `opciones` (2 o más) | La solicitud es ambigua; no se generó SQL |
 | `sin_datos` | `motivo`; `sql_descartado` si el SQL lo detuvo la tool 3 | Las fuentes no tienen ese periodo o ese campo |
-| `error` | `motivo` | El modelo no dio una respuesta válida en 2 intentos |
+| `error` | `motivo`; `sql_rechazado` si el último SQL lo rechazó PostgreSQL | El modelo no dio una respuesta válida en 2 intentos |
 
 ```json
 {"tipo": "sql", "intentos": 1,
@@ -71,12 +72,12 @@ Usa los estados de [estado_caso.md](estado_caso.md).
 
 | Salida | Siguiente paso | Estado del caso |
 |---|---|---|
-| `sql` | Ejecutar con la tool 4 y pasar las filas, el SQL, los filtros y los supuestos al Agente 2 | `recibido` → `consultado` |
+| `sql` | Ejecutar con la tool 4 (o usar `filas` si se pasó `execute`) y pasar las filas, el SQL, los filtros y los supuestos al Agente 2 | `recibido` → `consultado` |
 | `aclaracion` | Bloquear con motivo `Aclaración: <pregunta> Opciones: <a>; <b>` | `recibido` → `bloqueado` |
 | `sin_datos` | **Propuesta:** no bloquear; avanzar con cero filas y el motivo, para que el reporte declare la falta de datos (Escenario 5) | `recibido` → `consultado` |
 | `error` | Bloquear con el `motivo` | `recibido` → `bloqueado` |
 | Excepción de conexión con el modelo | Bloquear por agente apagado (O5) | `recibido` → `bloqueado` |
-| Error de la tool 4 | Registrar el evento `error` y bloquear | `recibido` → `bloqueado` |
+| Error de la tool 4 | Registrar el evento `error` y bloquear. Con `execute`, solo llegan aquí los errores que no se reintentan (conexión, límite de 60 s) | `recibido` → `bloqueado` |
 
 **Después de una aclaración:** el auditor responde y desbloquea; el caso vuelve a
 `recibido`, y el orquestador llama otra vez a la tool 2 con la misma solicitud y

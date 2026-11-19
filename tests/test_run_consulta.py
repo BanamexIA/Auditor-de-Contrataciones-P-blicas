@@ -3,9 +3,12 @@ import unittest
 from decimal import Decimal
 from pathlib import Path
 
+from psycopg import errors as pg_errors
+
 from agents.consulta.coverage import Coverage, check_coverage
 from agents.consulta.validator import validate_sql
 from eval.run_consulta import (
+    ask_and_execute,
     canonical_rows,
     compare_results,
     evaluate,
@@ -100,6 +103,32 @@ class EvaluateTests(unittest.TestCase):
         self.assertEqual(evaluate(CASE_SQL, {"tipo": "error", "motivo": "x", "intentos": 2})["error"], "error_modelo")
         row = evaluate(CASE_SQL, {"tipo": "sql", "sql": "SELECT 1", "intentos": 1}, [{"n": 1}], None, "QueryCanceled: timeout")
         self.assertEqual(row["error"], "error_ejecucion")
+
+    def test_sql_rejected_twice_by_the_database_is_an_execution_error(self):
+        answer = {"tipo": "error", "motivo": "PostgreSQL rechazó…", "intentos": 2, "sql_rechazado": "SELECT c.*"}
+        row = evaluate(CASE_SQL, answer, [{"n": 1}])
+        self.assertEqual(row["error"], "error_ejecucion")
+        self.assertEqual(row["sql"], "SELECT c.*")
+
+
+class AskAndExecuteTests(unittest.TestCase):
+    def test_returns_the_rows_of_a_sql_answer(self):
+        answer = {"tipo": "sql", "sql": "s", "intentos": 1, "filas": [{"n": 1}]}
+        self.assertEqual(ask_and_execute("¿?", lambda question: answer), (answer, [{"n": 1}], None))
+
+    def test_other_answers_have_no_rows(self):
+        answer = {"tipo": "sin_datos", "motivo": "m", "intentos": 1}
+        self.assertEqual(ask_and_execute("¿?", lambda question: answer), (answer, None, None))
+
+    def test_a_database_error_the_agent_does_not_retry_is_recorded(self):
+        def timeout(question):
+            raise pg_errors.QueryCanceled("canceling statement due to statement timeout")
+
+        answer, rows, detail = ask_and_execute("¿?", timeout)
+        self.assertEqual(answer["tipo"], "error")
+        self.assertIsNone(rows)
+        self.assertIn("QueryCanceled", detail)
+        self.assertEqual(evaluate(CASE_SQL, answer, [{"n": 1}], rows, detail)["error"], "error_ejecucion")
 
 
 class SummaryTests(unittest.TestCase):

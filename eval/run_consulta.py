@@ -1,8 +1,9 @@
 """Measures the Agente Consulta on the golden set (A4).
 
 Unlike eval/run_benchmark.py, which compares models, this runs the full agent
-(prompt, validator, coverage check) with one model, does not pass the case notes
-to the model, and compares results ignoring column aliases and column order.
+(prompt, validator, coverage check and execution, with the retry when
+PostgreSQL rejects the SQL) with one model, does not pass the case notes to the
+model, and compares results ignoring column aliases and column order.
 
     python -m eval.run_consulta --repeticiones 3
     python -m eval.run_consulta --casos eval/casos_consulta.yaml
@@ -74,7 +75,8 @@ def evaluate(case: dict[str, Any], answer: dict[str, Any], expected_rows=None, a
     expected_type = case["tipo_esperado"]
     obtained_type = answer["tipo"]
     if obtained_type == "error":
-        error = "error_modelo"
+        # sql_rechazado: the model's last SQL was rejected by PostgreSQL, not by the validator.
+        error = "error_ejecucion" if execution_error or answer.get("sql_rechazado") else "error_modelo"
     elif obtained_type != expected_type:
         error = "tipo_incorrecto"
     elif expected_type != "sql":
@@ -92,7 +94,7 @@ def evaluate(case: dict[str, Any], answer: dict[str, Any], expected_rows=None, a
         "error": error,
         "detalle_error": execution_error or answer.get("motivo"),
         "intentos": answer.get("intentos"),
-        "sql": answer.get("sql") or answer.get("sql_descartado"),
+        "sql": answer.get("sql") or answer.get("sql_descartado") or answer.get("sql_rechazado"),
         "supuestos": answer.get("supuestos", []),
         "filas_esperadas": len(expected_rows) if expected_rows is not None else None,
         "filas_obtenidas": len(actual_rows) if actual_rows is not None else None,
@@ -153,6 +155,23 @@ def write_report(output_dir: Path, results: list[dict[str, Any]], summary: dict[
     (output_dir / "resumen.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def ask_and_execute(question: str, answer_fn) -> tuple[dict[str, Any], Any, str | None]:
+    """Runs the agent with execution, as in production, so PostgreSQL errors get the retry.
+
+    answer_fn(question) calls answer_question with an executor. Returns the
+    answer, the rows (only for a sql answer) and the error of a database failure
+    that the agent does not retry, such as a timeout.
+    """
+    import psycopg
+
+    try:
+        answer = answer_fn(question)
+    except psycopg.Error as exc:
+        detail = f"{type(exc).__name__}: {exc}"
+        return {"tipo": "error", "motivo": detail}, None, detail
+    return answer, answer.get("filas") if answer["tipo"] == "sql" else None, None
+
+
 def run(model: str | None, repetitions: int, output_root: Path, cases_path: Path = GOLDEN_SET_PATH) -> Path:
     from agents.consulta.agent import answer_question
     from agents.consulta.coverage import COVERAGE_QUERY, Coverage
@@ -177,17 +196,14 @@ def run(model: str | None, repetitions: int, output_root: Path, cases_path: Path
         for case in cases if case["tipo_esperado"] == "sql"
     }
 
+    def answer_fn(question: str) -> dict[str, Any]:
+        return answer_question(question, client, system_prompt, coverage, execute=execute_read_only)
+
     results = []
     for repetition in range(1, repetitions + 1):
         for case in cases:
             started = time.perf_counter()
-            answer = answer_question(case["pregunta"], client, system_prompt, coverage)
-            actual_rows, execution_error = None, None
-            if answer["tipo"] == "sql" and case["tipo_esperado"] == "sql":
-                try:
-                    actual_rows = execute_read_only(answer["sql"])
-                except Exception as exc:
-                    execution_error = f"{type(exc).__name__}: {exc}"
+            answer, actual_rows, execution_error = ask_and_execute(case["pregunta"], answer_fn)
             row = evaluate(case, answer, expected.get(case["id"]), actual_rows, execution_error)
             row["repeticion"] = repetition
             row["latencia_ms"] = round((time.perf_counter() - started) * 1000, 1)
