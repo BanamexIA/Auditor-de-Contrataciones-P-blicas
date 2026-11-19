@@ -21,3 +21,5 @@ rag/results/*
 telemetry/results/*
 !telemetry/results/.gitkeep
 docs/reporte_calidad.md
+__pycache__/
+*.pyc

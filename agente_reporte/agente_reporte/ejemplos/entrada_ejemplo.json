@@ -1,0 +1,54 @@
+{
+  "consulta_id": "CONSULTA-DEMO-001",
+  "version_reglas": "catalogo-senales-v0.1",
+  "contratos": [
+    {"id": "CMX-2026-0001", "proveedor": "Servicios Alfa SA de CV", "rfc": "SAL010101AAA", "monto": 1500000.00, "dependencia": "Dependencia Demo A", "tipo_procedimiento": "Adjudicación directa", "fecha": "2026-03-02", "fuente": "ComprasMX 2026"},
+    {"id": "CMX-2026-0002", "proveedor": "Servicios Alfa SA de CV", "rfc": "SAL010101AAA", "monto": 1650000.00, "dependencia": "Dependencia Demo A", "tipo_procedimiento": "Adjudicación directa", "fecha": "2026-03-09", "fuente": "ComprasMX 2026"},
+    {"id": "CMX-2026-0003", "proveedor": "Servicios Alfa SA de CV", "rfc": "SAL010101AAA", "monto": 1700000.00, "dependencia": "Dependencia Demo A", "tipo_procedimiento": "Adjudicación directa", "fecha": "2026-03-15", "fuente": "ComprasMX 2026"},
+    {"id": "CMX-2026-0004", "proveedor": "Comercial Beta", "rfc": null, "monto": 320000.00, "dependencia": "Dependencia Demo B", "tipo_procedimiento": "Invitación a cuando menos tres personas", "fecha": "2026-04-01", "fuente": "ComprasMX 2026"}
+  ],
+  "senales": [
+    {
+      "codigo": "ADJ_DIRECTA_RECURRENTE",
+      "nombre": "Adjudicaciones directas recurrentes al mismo proveedor",
+      "criterio": "Más adjudicaciones directas al mismo proveedor que el umbral dentro de la ventana de días",
+      "umbral": "más de 2 adjudicaciones directas en 30 días",
+      "valores_calculados": {"num_adjudicaciones_directas": 3, "ventana_dias": 13, "monto_total": 4850000.00},
+      "contratos_ids": ["CMX-2026-0001", "CMX-2026-0002", "CMX-2026-0003"],
+      "confianza": "alta"
+    },
+    {
+      "codigo": "MONTO_ATIPICO",
+      "nombre": "Monto atípico frente a casos comparables",
+      "criterio": "Monto que se desvía del promedio de contratos comparables más allá del umbral",
+      "umbral": "desviación mayor a 2 desviaciones estándar",
+      "valores_calculados": {"desviaciones_estandar": 2.4, "promedio_comparables": 980000.00},
+      "contratos_ids": ["CMX-2026-0003"],
+      "confianza": "baja"
+    },
+    {
+      "codigo": "PROVEEDOR_LISTA_69B",
+      "nombre": "Proveedor en lista 69-B del SAT",
+      "criterio": "Coincidencia por RFC con la lista pública del SAT",
+      "umbral": "coincidencia exacta de RFC",
+      "contratos_ids": ["CMX-2026-0004"],
+      "estado": "no_evaluable",
+      "campos_faltantes": ["rfc"]
+    }
+  ],
+  "normas_recuperadas": [
+    {"fragmento_id": "frag-laassp-0041", "senal_codigo": "ADJ_DIRECTA_RECURRENTE", "norma": "LAASSP", "articulo": "41", "version": "2025", "vigencia": "2025-04-17", "texto": "[TEXTO DE EJEMPLO: sustituir por el fragmento real recuperado del corpus]"},
+    {"fragmento_id": "frag-cff-0069B", "senal_codigo": "PROVEEDOR_LISTA_69B", "norma": "CFF", "articulo": "69-B", "version": "2025", "texto": "[TEXTO DE EJEMPLO: sustituir por el fragmento real recuperado del corpus]"}
+  ],
+  "excluidos": [
+    {"contrato_id": "CMX-2026-0004", "motivo": "sin RFC del proveedor"}
+  ],
+  "contradicciones": [
+    {"contrato_id": "CMX-2026-0002", "campo": "monto", "valor_a": "1650000.00", "fuente_a": "registro ComprasMX", "valor_b": "1560000.00", "fuente_b": "documento del contrato (p. 3)"}
+  ],
+  "concentracion": [
+    {"rfc": "SAL010101AAA", "proveedor": "Servicios Alfa SA de CV", "num_contratos": 3, "monto_total": 4850000.00, "porcentaje_monto": 93.8, "porcentaje_adjudicaciones_directas": 100.0},
+    {"rfc": null, "proveedor": "Comercial Beta", "num_contratos": 1, "monto_total": 320000.00, "porcentaje_monto": 6.2, "porcentaje_adjudicaciones_directas": 0.0}
+  ],
+  "patrones_adjudicacion": {"porcentaje_adjudicacion_directa_dependencia_a": 100.0}
+}
