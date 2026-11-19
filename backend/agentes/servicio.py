@@ -9,6 +9,7 @@ from typing import Any
 from backend.agentes.repositorio import RepositorioAgentes
 from backend.agentes.verificacion import (
     DISPONIBLE,
+    SIN_MODELO,
     ClienteHttp,
     _get_json,
     modelo_requerido,
@@ -53,17 +54,26 @@ def seleccionar_agente(
     ninguno responde, lanza ``AgenteNoDisponible`` con el estado de cada uno.
     """
     probados = []
+    pasos = []
     for agente in _orden(repo.listar(), usuario):
         actualizado = verificar_agente(repo, agente, http)
         if actualizado["estado"] == DISPONIBLE:
             return {**actualizado, "url": url_de(actualizado["nombre_tailnet"]),
                     "modelo": modelo_requerido(actualizado)}
-        probados.append(f"{actualizado['nombre_tailnet']} ({actualizado['estado']})")
+        nombre, estado = actualizado["nombre_tailnet"], actualizado["estado"]
+        if estado == SIN_MODELO:
+            modelo = modelo_requerido(actualizado)
+            probados.append(f"{nombre} (sin_modelo: falta {modelo})")
+            pasos.append(f"en {nombre} ejecuta 'ollama pull {modelo}'")
+        else:
+            probados.append(f"{nombre} ({estado})")
+            pasos.append(f"enciende {nombre} con Tailscale conectado y Ollama abierto")
     if not probados:
         raise AgenteNoDisponible("No hay agentes registrados. Pide al administrador que dé de alta uno.")
     raise AgenteNoDisponible(
         "Ningún agente de inferencia disponible: " + ", ".join(probados)
-        + ". Enciende la laptop con Ollama y desbloquea el caso."
+        + ". Para continuar, " + " o ".join(dict.fromkeys(pasos))
+        + "; después desbloquea el caso."
     )
 
 

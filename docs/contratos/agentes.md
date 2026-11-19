@@ -55,7 +55,7 @@ else:
 
 Mensaje de ejemplo cuando nadie responde:
 
-> Ningún agente de inferencia disponible: laptop-mich (apagado), laptop-alean (sin_modelo). Enciende la laptop con Ollama y desbloquea el caso.
+> Ningún agente de inferencia disponible: laptop-mich (apagado), laptop-alean (sin_modelo: falta qwen2.5:7b). Para continuar, enciende laptop-mich con Tailscale conectado y Ollama abierto o en laptop-alean ejecuta 'ollama pull qwen2.5:7b'; después desbloquea el caso.
 
 `equipo` en la bitácora es el `nombre_tailnet` del agente (contrato 5).
 
