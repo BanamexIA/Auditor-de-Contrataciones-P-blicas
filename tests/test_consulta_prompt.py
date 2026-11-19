@@ -1,10 +1,12 @@
 import json
+import re
 import unittest
 from pathlib import Path
 
 import yaml
 
 from agents.consulta.prompt import (
+    BOOLEAN_COLUMNS,
     BUILT_IN_EXAMPLES,
     LIMIT_ADDED_NOTE,
     ResponseFormatError,
@@ -12,7 +14,7 @@ from agents.consulta.prompt import (
     build_user_prompt,
     parse_response,
 )
-from agents.consulta.validator import MAX_SQL_ROWS, SQLValidationError
+from agents.consulta.validator import MAX_SQL_ROWS, VIEW_COLUMNS, SQLValidationError, validate_sql
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,6 +39,54 @@ class SystemPromptTests(unittest.TestCase):
     def test_includes_the_data_rules(self):
         self.assertIn("No hay contratos con inicio en 2025", self.prompt)
         self.assertIn("COUNT(DISTINCT codigo_contrato)", self.prompt)
+
+    def test_includes_the_rules_for_the_a4_mistakes(self):
+        # A5, mejora 4: q16 (SELECT *), q08 (list with GROUP BY), c13 (missing filter),
+        # q06 ("preliminar" read as a filter) and q07 (69-B column in the wrong view).
+        for fragment in (
+            "Nunca uses SELECT *",
+            "En una lista no uses GROUP BY",
+            "todas las condiciones de la pregunta",
+            "no filtres por tipo_procedimiento_estado",
+            "JOIN clean.v_coincidencias_69b_agente AS m ON m.codigo_contrato = c.codigo_contrato",
+        ):
+            with self.subTest(regla=fragment):
+                self.assertIn(fragment, self.prompt)
+
+    def test_boolean_rule_names_every_boolean_column_of_the_views(self):
+        declared = set()
+        for name in ("04_clean.sql", "06_fase4b_schema.sql"):
+            text = (ROOT / "etl" / "sql" / name).read_text(encoding="utf-8")
+            declared |= set(re.findall(r"(\w+)\s+BOOLEAN\b", text, flags=re.IGNORECASE))
+        in_views = {column for columns in VIEW_COLUMNS.values() for column in columns}
+        self.assertEqual(set(BOOLEAN_COLUMNS), declared & in_views)
+        self.assertIn("nunca comparadas con texto como 'S' o 'si'", self.prompt)
+
+    def test_lists_the_concepts_the_sources_lack(self):
+        # A5, mejora 5: the same list the agent checks in code.
+        for concept in ("cancelaciones", "rescisiones", "convenios modificatorios", "pagos", "sanciones", "multas"):
+            with self.subTest(concepto=concept):
+                self.assertIn(concept, self.prompt)
+        self.assertIn("no lo sustituyas con otra columna", self.prompt)
+
+    def test_leaves_coverage_notes_to_the_system(self):
+        # A5, mejora 6: the old rule asked the model to write the partial-year note.
+        self.assertNotIn("anota en supuestos que el año está incompleto", self.prompt)
+        self.assertIn("eso lo agrega el sistema", self.prompt)
+
+    def test_lists_every_procedure_type_of_the_semantic_layer(self):
+        document = (ROOT / "docs" / "capa_semantica.md").read_text(encoding="utf-8")
+        for value in ("adjudicacion_directa", "invitacion_tres_personas", "licitacion_publica", "otro", "sin_dato"):
+            with self.subTest(valor=value):
+                self.assertIn(f"`{value}`", document)
+                self.assertIn(value, self.prompt)
+
+    def test_the_join_in_the_rules_passes_the_validator(self):
+        validate_sql(
+            "SELECT c.codigo_contrato, c.fuente, m.nivel_confianza "
+            "FROM clean.v_contratos_agente AS c JOIN clean.v_coincidencias_69b_agente AS m "
+            "ON m.codigo_contrato = c.codigo_contrato LIMIT 20"
+        )
 
     def test_renders_every_example_as_a_valid_response(self):
         self.assertEqual(self.prompt.count("Pregunta: "), len(self.examples) + len(BUILT_IN_EXAMPLES))

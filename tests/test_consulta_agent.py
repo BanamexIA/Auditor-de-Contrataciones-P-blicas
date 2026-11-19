@@ -3,7 +3,7 @@ import unittest
 
 from psycopg import errors as pg_errors
 
-from agents.consulta.agent import MAX_ATTEMPTS, answer_question
+from agents.consulta.agent import MAX_ATTEMPTS, answer_question, talks_about_coverage
 from agents.consulta.coverage import Coverage
 from agents.consulta.prompt import LIMIT_ADDED_NOTE
 from llm.base import LLMClient, LLMResponse
@@ -131,6 +131,103 @@ class AnswerQuestionTests(unittest.TestCase):
         ask(client, clarifications=[("¿Por número o por importe?", "Por número de contratos")])
         self.assertIn("Respuesta del auditor: Por número de contratos", client.prompts[0])
         self.assertIn("no vuelvas a preguntar", client.prompts[0])
+
+
+class FailedAttemptsTests(unittest.TestCase):
+    """A5, mejora 9: each failed attempt says which stage rejected it and why."""
+
+    def test_first_try_success_has_no_failed_attempts(self):
+        self.assertEqual(ask(FakeClient(sql_answer(VALID_SQL)))["intentos_fallidos"], [])
+
+    def test_validator_rejection_keeps_the_proposed_sql(self):
+        bad = "SELECT * FROM clean.contratos LIMIT 1"
+        result = ask(FakeClient(sql_answer(bad), sql_answer(VALID_SQL)))
+        self.assertEqual(len(result["intentos_fallidos"]), 1)
+        failed = result["intentos_fallidos"][0]
+        self.assertEqual((failed["intento"], failed["etapa"], failed["sql"]), (1, "validador", bad))
+        self.assertIn("Tabla no permitida", failed["error"])
+
+    def test_format_and_database_failures_are_told_apart(self):
+        client = FakeClient("no es JSON", sql_answer(GROUPING_SQL))
+        execute = FakeExecutor(pg_errors.GroupingError(GROUPING_ERROR))
+        result = ask(client, execute=execute)
+        self.assertEqual(result["tipo"], "error")
+        self.assertEqual([item["etapa"] for item in result["intentos_fallidos"]], ["formato", "base"])
+        self.assertIsNone(result["intentos_fallidos"][0]["sql"])
+        self.assertIn("SELECT c.*", result["intentos_fallidos"][1]["sql"])
+
+
+class MissingConceptTests(unittest.TestCase):
+    """A5, mejora 5: c10 must answer "sin datos" instead of a substitute column."""
+
+    C10 = "¿Qué contratos se cancelaron antes de terminar?"
+
+    def test_c10_sql_with_a_substitute_column_becomes_no_data(self):
+        # The SQL the model wrote for c10 on 2026-11-17.
+        sql = (
+            "SELECT codigo_contrato, titulo_contrato, fecha_inicio, fecha_fin, fecha_fin_antes_inicio "
+            "FROM clean.v_contratos_agente WHERE fecha_fin_antes_inicio AND fecha_inicio_valida "
+            "AND fuente = 'comprasmx' LIMIT 50"
+        )
+        execute = FakeExecutor()
+        result = ask(FakeClient(sql_answer(sql)), question=self.C10, execute=execute)
+        self.assertEqual(result["tipo"], "sin_datos")
+        self.assertIn("cancelaciones", result["motivo"])
+        self.assertIn("fecha_fin_antes_inicio", result["sql_descartado"])
+        self.assertEqual(execute.queries, [])
+
+    def test_a_clarification_about_a_missing_concept_becomes_no_data(self):
+        answer = {"tipo": "aclaracion", "pregunta": "¿De qué fuente?", "opciones": ["ComprasMX", "Histórico"]}
+        result = ask(FakeClient(json.dumps(answer)), question=self.C10)
+        self.assertEqual(result["tipo"], "sin_datos")
+        self.assertNotIn("sql_descartado", result)
+
+    def test_the_reason_comes_from_code_even_if_the_model_said_no_data(self):
+        # The model's reason for c10 on 2026-11-19 also claimed end dates are not recorded.
+        answer = {"tipo": "sin_datos", "motivo": "No se registran cancelaciones ni fechas de finalización."}
+        result = ask(FakeClient(json.dumps(answer)), question=self.C10)
+        self.assertEqual(result["tipo"], "sin_datos")
+        self.assertIn("no registran cancelaciones de contratos", result["motivo"])
+        self.assertNotIn("fechas de finalización", result["motivo"])
+
+
+class CoverageNotesTests(unittest.TestCase):
+    """A5, mejora 6: only the coverage check writes notes about coverage."""
+
+    def test_detects_the_model_notes_seen_in_a4(self):
+        for note in (
+            "el año 2024 está completo",
+            "El año del periodo está incompleto",
+            "El año 2026 está completo",
+            "Cobertura incompleta en CompraNet histórico para 2024.",
+            "Los datos de 2010 son parciales.",
+            "No hay datos para 2025.",
+        ):
+            with self.subTest(supuesto=note):
+                self.assertTrue(talks_about_coverage(note))
+
+    def test_keeps_notes_about_interpretation(self):
+        for note in (
+            "Se cuentan registros de contrato, no contratos únicos.",
+            "El importe es importe registrado, no gasto pagado.",
+            "Se excluyen contratos sin fecha válida.",
+            LIMIT_ADDED_NOTE,
+        ):
+            with self.subTest(supuesto=note):
+                self.assertFalse(talks_about_coverage(note))
+
+    def test_a_false_model_note_is_replaced_by_the_coverage_check(self):
+        # q04 on 2026-11-17: the model said 2024 was complete next to the correct warning.
+        sql = (
+            "SELECT COUNT(*) AS contratos FROM clean.v_contratos_agente "
+            "WHERE fuente = 'historico' AND EXTRACT(YEAR FROM fecha_inicio) = 2024 LIMIT 1"
+        )
+        model_notes = ["El año 2024 está completo.", "Se cuentan registros de contrato."]
+        result = ask(FakeClient(sql_answer(sql, supuestos=model_notes)))
+        self.assertEqual(
+            result["supuestos"],
+            ["Se cuentan registros de contrato.", "Cobertura incompleta en CompraNet histórico para 2024."],
+        )
 
 
 class ExecutionRetryTests(unittest.TestCase):

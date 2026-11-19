@@ -143,6 +143,22 @@ def _is_start_year(node: exp.Expression) -> bool:
     )
 
 
+def _start_trunc_unit(node: exp.Expression) -> str | None:
+    """'YEAR' or 'MONTH' for DATE_TRUNC(unit, fecha_inicio); None otherwise."""
+    node = _unwrap(node)
+    if not isinstance(node, (exp.TimestampTrunc, exp.DateTrunc)) or not _is_column(node.this, "fecha_inicio"):
+        return None
+    unit = node.args.get("unit")
+    name = unit.name.upper() if unit is not None else ""
+    return name if name in ("YEAR", "MONTH") else None
+
+
+def _next_period(day: date, unit: str) -> date:
+    if unit == "YEAR":
+        return date(day.year + 1, 1, 1)
+    return date(day.year + 1, 1, 1) if day.month == 12 else date(day.year, day.month + 1, 1)
+
+
 def _date_value(node: exp.Expression) -> date | None:
     node = _unwrap(node)
     if isinstance(node, exp.Literal) and node.is_string:
@@ -184,6 +200,20 @@ def _apply_comparison(filters: _Filters, kind: type, target: exp.Expression, val
             exp.LT: (None, day),
             exp.LTE: (None, day + timedelta(days=1)),
             exp.EQ: (day, day + timedelta(days=1)),
+        }[kind]
+    elif _start_trunc_unit(target):
+        # DATE_TRUNC('year', fecha_inicio) = DATE '2024-01-01' covers the whole period
+        # (A5, mejora 6: the coverage notes must not depend on how the model wrote it).
+        day = _date_value(value)
+        if day is None:
+            return
+        following = _next_period(day, _start_trunc_unit(target))
+        bounds = {
+            exp.GTE: (day, None),
+            exp.GT: (following, None),
+            exp.LT: (None, day),
+            exp.LTE: (None, following),
+            exp.EQ: (day, following),
         }[kind]
     elif _is_start_year(target):
         year = _int_value(value)

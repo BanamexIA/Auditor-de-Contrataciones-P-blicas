@@ -92,22 +92,20 @@
     LIMIT 20
   notas: Una coincidencia es una señal para revisión humana, no una determinación de irregularidad.
 - id: q08
-  pregunta: Lista hasta 20 contratos iniciados en 2024 con coincidencia en el listado 69-B que requiere revisión humana.
+  pregunta: Lista los 20 contratos más recientes iniciados entre 2011 y 2022 con una coincidencia en el listado 69-B que requiere revisión humana, con su código, fuente, fecha de inicio, proveedor y nivel de confianza.
   dificultad: dificil
   tipo_esperado: sql
   sql_esperado: |
-    SELECT c.codigo_contrato, c.fuente, c.fecha_inicio, c.proveedor,
-           m.rfc, m.nombre_del_contribuyente, m.nivel_confianza,
-           m.requiere_revision_humana
+    SELECT c.codigo_contrato, c.fuente, c.fecha_inicio, c.proveedor, m.nivel_confianza
     FROM clean.v_contratos_agente AS c
     JOIN clean.v_coincidencias_69b_agente AS m
       ON m.codigo_contrato = c.codigo_contrato
-    WHERE c.fecha_inicio >= DATE '2024-01-01'
-      AND c.fecha_inicio < DATE '2025-01-01'
+    WHERE c.fecha_inicio >= DATE '2011-01-01'
+      AND c.fecha_inicio < DATE '2023-01-01'
       AND m.requiere_revision_humana
     ORDER BY c.fecha_inicio DESC, c.codigo_contrato
     LIMIT 20
-  notas: Limita datos personales al subconjunto necesario para revisión autorizada. Corregido el 2026-11-16; antes también pedía rfc_exacto, que nunca coincide con requiere_revision_humana.
+  notas: Limita datos personales al subconjunto necesario para revisión autorizada. Corregido el 2026-11-16; antes también pedía rfc_exacto, que nunca coincide con requiere_revision_humana. Cambiado el 2026-11-19 (A5, mejora 8) porque 2024 no tiene coincidencias que requieran revisión y la respuesta esperada era vacía; ahora cubre los años completos del histórico, donde están las coincidencias por nombre, y la pregunta dice el orden y las columnas, porque hay más de 20 contratos que cumplen.
 - id: q09
   pregunta: ¿Cuántas coincidencias 69-B hay por nivel de confianza?
   dificultad: media

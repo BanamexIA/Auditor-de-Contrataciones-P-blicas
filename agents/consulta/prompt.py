@@ -4,6 +4,7 @@ import json
 import re
 from typing import Any, Sequence
 
+from agents.consulta.concepts import MISSING_CONCEPTS
 from agents.consulta.validator import MAX_SQL_ROWS, add_missing_limit, validate_sql
 
 
@@ -19,10 +20,28 @@ DATA_RULES = """Reglas de los datos:
 - Un periodo se filtra con un rango semiabierto de fecha_inicio, por ejemplo fecha_inicio >= DATE '2024-01-01' AND fecha_inicio < DATE '2025-01-01'. Para agrupar por año usa EXTRACT(YEAR FROM fecha_inicio)::integer y filtra fecha_inicio_valida.
 - Cada fila de clean.v_contratos_agente es un registro de contrato: cuenta con COUNT(*).
 - importe se suma por fuente y por moneda. Es importe registrado, no gasto pagado.
-- tipo_procedimiento_norm es una clasificación preliminar.
+- tipo_procedimiento_norm es una clasificación preliminar con los valores adjudicacion_directa, invitacion_tres_personas, licitacion_publica, otro y sin_dato.
 - Los porcentajes se calculan desde conteos, con NULLIF en el denominador. Nunca sumes ni promedies porcentajes.
 - clean.v_coincidencias_69b_agente tiene una fila por contrato, no por empresa. Al unirla con clean.v_contratos_agente por codigo_contrato, cuenta COUNT(DISTINCT codigo_contrato). nivel_confianza 'alta' es RFC exacto y 'media' es solo nombre. La vista no tiene la situación del contribuyente: no la afirmes.
 - Ordena los rankings por la métrica y después por el nombre."""
+
+# Boolean columns of the approved views (etl/sql/04_clean.sql and 06_fase4b_schema.sql).
+BOOLEAN_COLUMNS = (
+    "fecha_inicio_valida", "fecha_inicio_futura", "fecha_fin_antes_inicio",
+    "rfc_exacto", "nombre_normalizado_exacto", "requiere_revision_humana",
+)
+
+# A5, mejora 4: rules for the mistakes seen in the A4 measurement (2026-11-17) and in
+# the quick check with the model on 2026-11-19 (booleans compared with 'S' or 'si').
+SQL_RULES = f"""- Nunca uses SELECT * ni alias.*: escribe cada columna que devuelves.
+- Si piden una lista de contratos («lista contratos…», «muestra contratos…», «¿qué contratos…?»), devuelve una fila por contrato con codigo_contrato, fuente y las columnas de cada dato que la pregunta menciona: si habla de fechas o importes, devuelve esas columnas. En una lista no uses GROUP BY ni funciones de agregación.
+- {", ".join(BOOLEAN_COLUMNS)} son verdadero o falso: úsalas solas en WHERE (por ejemplo WHERE m.rfc_exacto) o con NOT, nunca comparadas con texto como 'S' o 'si'.
+- Pon en WHERE todas las condiciones de la pregunta: fuente, periodo, tipo de procedimiento, institución, coincidencia con el 69-B. Si nombra un tipo de procedimiento, filtra tipo_procedimiento_norm con su valor.
+- "Preliminar" describe toda la clasificación de tipo_procedimiento_norm, no es un filtro: no filtres por tipo_procedimiento_estado salvo que la pregunta pida un estado de validación.
+- rfc_exacto, nivel_confianza, requiere_revision_humana, rfc y nombre_del_contribuyente solo están en clean.v_coincidencias_69b_agente. Si la pregunta habla del 69-B y necesitas esas columnas junto con datos del contrato, une las vistas: FROM clean.v_contratos_agente AS c JOIN clean.v_coincidencias_69b_agente AS m ON m.codigo_contrato = c.codigo_contrato. Si no habla del 69-B, no las unas."""
+
+# A5, mejora 5: the same list the agent checks in code (agents/consulta/concepts.py).
+MISSING_CONCEPTS_TEXT = "; ".join(concept for _, concept in MISSING_CONCEPTS)
 
 BUILT_IN_EXAMPLES = (
     {
@@ -42,6 +61,13 @@ BUILT_IN_EXAMPLES = (
         "respuesta": {
             "tipo": "sin_datos",
             "motivo": "Las fuentes no registran fechas de pago, y el importe no es gasto pagado.",
+        },
+    },
+    {
+        "pregunta": "¿Qué proveedores fueron sancionados?",
+        "respuesta": {
+            "tipo": "sin_datos",
+            "motivo": "Las fuentes no registran sanciones ni inhabilitaciones. El listado 69-B es una presunción fiscal, no una sanción.",
         },
     },
 )
@@ -81,15 +107,19 @@ Responde solo con un objeto JSON, sin texto adicional, con una de estas formas:
 {{"tipo": "sin_datos", "motivo": "<por qué las fuentes no tienen ese dato>"}}
 
 Cuándo usar cada tipo:
-- sql: la pregunta se puede responder con las vistas sin adivinar. Si el periodo es 2010, 2023 o 2024, anota en supuestos que el año está incompleto.
+- sql: la pregunta se puede responder con las vistas sin adivinar.
 - aclaracion: falta elegir la métrica, el periodo o la fuente, y elegir mal cambiaría la respuesta. No escribas SQL.
-- sin_datos: el periodo o el campo no existe en las fuentes. No escribas SQL ni estimes.
+- sin_datos: el periodo, el campo o el concepto no existe en las fuentes. No escribas SQL ni estimes.
+- Las fuentes no registran: {MISSING_CONCEPTS_TEXT}. Si la pregunta trata de uno de ellos, responde sin_datos y no lo sustituyas con otra columna parecida, como una fecha o una bandera de calidad.
+
+En supuestos anota solo cómo interpretaste la pregunta, por ejemplo qué métrica usaste. No escribas nada sobre años o periodos completos o incompletos ni sobre la cobertura de las fuentes: eso lo agrega el sistema.
 
 Reglas del SQL:
 - Una sola sentencia SELECT. Solo puedes leer clean.v_contratos_agente y clean.v_coincidencias_69b_agente, siempre con el esquema clean.
 - Incluye LIMIT con un entero entre 1 y {MAX_SQL_ROWS}.
 - No uses WITH, UNION, RANK, DENSE_RANK, NTILE ni unaccent. Si necesitas pasos intermedios, usa subconsultas.
 - Usa solo las columnas de la lista de abajo.
+{SQL_RULES}
 
 {DATA_RULES}
 
@@ -141,6 +171,15 @@ def _text_list(payload: dict[str, Any], key: str, minimum: int = 0) -> list[str]
     if len(value) < minimum:
         raise ResponseFormatError(f"'{key}' debe tener al menos {minimum} elementos.")
     return [item.strip() for item in value]
+
+
+def proposed_sql(text: str) -> str | None:
+    """The "sql" field of a model answer, if it can be read; used to record failed attempts."""
+    try:
+        value = _load_json_object(text).get("sql")
+    except ResponseFormatError:
+        return None
+    return value.strip() if isinstance(value, str) and value.strip() else None
 
 
 def parse_response(text: str) -> dict[str, Any]:

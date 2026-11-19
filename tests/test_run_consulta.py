@@ -3,14 +3,18 @@ import unittest
 from decimal import Decimal
 from pathlib import Path
 
+import yaml
 from psycopg import errors as pg_errors
 
 from agents.consulta.coverage import Coverage, check_coverage
 from agents.consulta.validator import validate_sql
+from agents.consulta.concepts import missing_concept
+from agents.consulta.prompt import BUILT_IN_EXAMPLES
 from eval.run_consulta import (
     ask_and_execute,
     canonical_rows,
     compare_results,
+    consistency,
     evaluate,
     load_cases,
     summarize,
@@ -55,12 +59,55 @@ class GoldenSetTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "sql_esperado"):
                 load_cases(path)
 
+    def test_q08_covers_complete_years_only(self):
+        # A5, mejora 8: 2024 had no coincidence needing review, so q08 expected no rows.
+        q08 = next(case for case in self.cases if case["id"] == "q08")
+        check = check_coverage(validate_sql(q08["sql_esperado"]), Coverage.from_rows(M9_ROWS))
+        self.assertIsNone(check.sin_datos)
+        self.assertEqual(check.supuestos, [])
+        self.assertNotIn("2024", q08["sql_esperado"])
+
     def test_no_case_asks_for_an_impossible_combination(self):
         for case in self.cases:
             sql = case["sql_esperado"]
             where = sql.split("WHERE", 1)[1] if "WHERE" in sql else ""
             with self.subTest(caso=case["id"]):
                 self.assertFalse("rfc_exacto" in where and "requiere_revision_humana" in where)
+
+
+class CompanyCasesTests(unittest.TestCase):
+    """A5, mejora 8: eval/casos_empresa.yaml, the company questions of the demo."""
+
+    def setUp(self):
+        self.path = Path(__file__).resolve().parents[1] / "eval" / "casos_empresa.yaml"
+        self.cases = load_cases(self.path)
+
+    def test_cases_are_new_and_cover_sql_and_no_data(self):
+        seen = {item["pregunta"].casefold() for item in BUILT_IN_EXAMPLES}
+        for name in ("golden_set.yaml", "casos_consulta.yaml", "examples.yaml"):
+            others = yaml.safe_load((self.path.parent / name).read_text(encoding="utf-8"))
+            seen |= {case["pregunta"].casefold() for case in others}
+        ids = [case["id"] for case in self.cases]
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertGreaterEqual(sum(case["tipo_esperado"] == "sql" for case in self.cases), 5)
+        self.assertGreaterEqual(sum(case["tipo_esperado"] == "sin_datos" for case in self.cases), 1)
+        for case in self.cases:
+            with self.subTest(caso=case["id"]):
+                self.assertNotIn(case["pregunta"].casefold(), seen)
+                self.assertTrue(case["notas"].strip())
+
+    def test_reference_sql_passes_the_validator_and_the_coverage_check(self):
+        coverage = Coverage.from_rows(M9_ROWS)
+        for case in self.cases:
+            sql = case.get("sql_esperado") or case.get("sql_ingenuo")
+            with self.subTest(caso=case["id"]):
+                check = check_coverage(validate_sql(sql), coverage)
+                self.assertEqual(check.sin_datos is not None, case["tipo_esperado"] == "sin_datos")
+
+    def test_no_question_is_mistaken_for_a_missing_concept(self):
+        for case in self.cases:
+            with self.subTest(caso=case["id"]):
+                self.assertIsNone(missing_concept(case["pregunta"]))
 
 
 class CompareResultsTests(unittest.TestCase):
@@ -109,6 +156,44 @@ class EvaluateTests(unittest.TestCase):
         row = evaluate(CASE_SQL, answer, [{"n": 1}])
         self.assertEqual(row["error"], "error_ejecucion")
         self.assertEqual(row["sql"], "SELECT c.*")
+
+
+class AttemptsAndConsistencyTests(unittest.TestCase):
+    """A5, mejora 9: what the measurement keeps about retries and repetitions."""
+
+    def test_detail_keeps_the_error_of_each_failed_attempt(self):
+        answer = {"tipo": "sql", "sql": "s", "intentos": 2, "intentos_fallidos": [
+            {"intento": 1, "etapa": "validador", "error": "Tabla no permitida", "sql": "x"},
+        ]}
+        row = evaluate(CASE_SQL, answer, [{"n": 1}], [{"n": 1}])
+        self.assertEqual(row["errores_intentos"], "1 validador: Tabla no permitida")
+        self.assertEqual(evaluate(CASE_NO_DATA, {"tipo": "sin_datos", "motivo": "m"})["errores_intentos"], "")
+
+    def test_consistency_counts_cases_with_the_same_sql_and_verdict(self):
+        same = {"id": "q01", "sql": "s", "correcto": True, "error": None}
+        results = [same, same, same, {**same, "id": "q07"}, {**same, "id": "q07", "sql": "t", "correcto": False}]
+        self.assertEqual(
+            consistency(results),
+            {"casos": 2, "consistentes": 1, "pct": 50.0, "casos_que_variaron": ["q07"]},
+        )
+
+    def test_consistency_needs_more_than_one_repetition(self):
+        self.assertIsNone(consistency([{"id": "q01", "sql": "s", "correcto": True, "error": None}]))
+
+    def test_report_warns_about_empty_expected_results_and_shows_consistency(self):
+        results = [
+            evaluate(CASE_SQL, {"tipo": "sql", "sql": "s", "intentos": 1}, [], []),
+            evaluate(CASE_SQL, {"tipo": "sql", "sql": "s", "intentos": 1}, [], []),
+        ]
+        summary = summarize(results)
+        self.assertEqual(summary["esperados_vacios"], ["q01"])
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder) / "consulta"
+            metadata = {"modelo": "m", "casos": 1, "repeticiones": 2, "fecha": "2026-11-19"}
+            write_report(output, results, summary, metadata)
+            report = (output / "resumen.md").read_text(encoding="utf-8")
+        self.assertIn("q01 tienen un resultado esperado vacío", report)
+        self.assertIn("1 de 1 casos (100.0 %)", report)
 
 
 class AskAndExecuteTests(unittest.TestCase):

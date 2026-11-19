@@ -183,6 +183,14 @@ class ColumnTests(unittest.TestCase):
             f"solo está en {COINCIDENCIAS}", "alias",
         )
 
+    def test_an_alias_that_does_not_exist_is_named_as_the_problem(self):
+        # q06 on 2026-11-19: alias t was never defined; the column itself exists.
+        self.assert_rejected(
+            f"SELECT c.fuente, t.tipo_procedimiento_norm, COUNT(*) FROM {CONTRATOS} AS c "
+            f"GROUP BY c.fuente, t.tipo_procedimiento_norm LIMIT 100",
+            "El alias t no corresponde", f"está en {CONTRATOS}",
+        )
+
     def test_column_that_exists_in_no_view(self):
         self.assert_rejected(f"SELECT monto FROM {CONTRATOS} LIMIT 5", "monto", "no existe")
 

@@ -149,14 +149,26 @@ def _check_columns(tree: exp.Select, views_in_query: set[str]) -> None:
         match = _COLUMN_IN_ERROR.search(str(exc))
         if not match:
             raise SQLValidationError(f"La consulta usa columnas que no se pudieron resolver: {exc}") from exc
-        column = (match.group(1) or match.group(2)).strip('"').lower()
-        raise SQLValidationError(_column_message(column, views_in_query)) from exc
+        name = (match.group(1) or match.group(2)).replace('"', "").lower()
+        qualifier, _, column = name.rpartition(".")
+        raise SQLValidationError(_column_message(column, views_in_query, qualifier, tree)) from exc
     except sqlglot.errors.SqlglotError as exc:
         raise SQLValidationError(f"No se pudieron revisar las columnas de la consulta: {exc}") from exc
 
 
-def _column_message(column: str, views_in_query: set[str]) -> str:
+def _column_message(column: str, views_in_query: set[str], qualifier: str = "",
+                    tree: exp.Expression | None = None) -> str:
     homes = [view for view, columns in VIEW_COLUMNS.items() if column in columns]
+    if qualifier and tree is not None:
+        # sqlglot names the qualifier only when it matches no table or subquery.
+        known = {node.alias_or_name.lower() for node in tree.find_all(exp.Table)}
+        known |= {node.alias.lower() for node in tree.find_all(exp.Subquery) if node.alias}
+        if qualifier not in known:
+            where = f" La columna {column} está en clean.{homes[0]}." if len(homes) == 1 else ""
+            return (
+                f"El alias {qualifier} no corresponde a ninguna vista ni subconsulta de la consulta."
+                f"{where} Usa el alias que le diste a esa vista en FROM o JOIN."
+            )
     if not homes:
         return f"La columna {column} no existe en las vistas aprobadas. Usa solo las columnas de la lista."
     if len(homes) > 1:

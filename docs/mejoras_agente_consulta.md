@@ -44,3 +44,51 @@ Después de cada paso se repiten las dos mediciones:
 
 La meta del diseño es 85 % de exactitud del SQL. Si no se alcanza, se reporta
 el valor real con sus tipos de error.
+
+## Avance
+
+**2026-11-19 — Mejoras 1 a 6 en el código, sin medir.** La EC2 estaba apagada,
+así que no se corrieron las dos mediciones. Además de lo que pedía cada mejora:
+
+- **Regla de booleanos (con la 4):** el modelo comparaba `rfc_exacto` y
+  `requiere_revision_humana` con `'S'` o `'si'`. El prompt nombra las 6 columnas
+  booleanas y pide usarlas solas en `WHERE`.
+- **`DATE_TRUNC` en la revisión de cobertura (con la 6):** si el modelo filtraba
+  el año con `DATE_TRUNC('year', fecha_inicio)`, el aviso de año incompleto se
+  perdía, porque ya no lo escribe el modelo.
+- **Mensaje del validador para un alias inexistente (sobre la 3):** antes decía
+  que la columna no existía, cuando lo que no existía era el alias.
+
+**Prueba rápida sin base** (modelo local con los comentarios de las columnas
+tomados de `etl/sql/07_fase4b_transform.sql`, sin ejecutar el SQL): c10 responde
+"sin datos"; q04, q06, q07, q08 y c13 escriben un SQL que se ve correcto; c12 ya
+lleva el aviso de 2024. q16 todavía devuelve una columna de más
+(`titulo_contrato`). q04 y q06 necesitaron dos intentos; la mejora 9 diría por
+qué.
+
+**Cuidado al leer la próxima medición:** las reglas salieron de los errores del
+mismo golden set, así que la exactitud puede verse mejor que con preguntas
+nuevas. Los casos de empresa de la mejora 8 sirven para comprobarlo.
+
+**2026-11-19 — Mejoras 8 y 9 en el código, sin medir.**
+
+- **q08** ahora cubre los años completos del histórico (2011–2022), donde están
+  las coincidencias por nombre, y la pregunta dice el orden y las columnas,
+  porque hay más de 20 contratos que cumplen. Falta confirmar con la base que
+  su resultado esperado ya no es vacío.
+- **`eval/casos_empresa.yaml`:** 6 casos de empresa (5 con SQL y 1 sin datos)
+  con proveedores de ComprasMX 2026. Van aparte para que el golden set siga
+  siendo comparable con A4 y porque no se usaron para ajustar el prompt.
+  Falta, con la base encendida, una empresa con coincidencia por RFC y otra
+  solo por nombre.
+- **Medidor:** `detalle.csv` trae `errores_intentos` (etapa y error de cada
+  intento fallido); el resumen muestra la consistencia entre repeticiones y
+  avisa si algún caso tiene un resultado esperado vacío.
+
+Mediciones con la base encendida:
+
+```powershell
+.venv\Scripts\python -m eval.run_consulta --repeticiones 3
+.venv\Scripts\python -m eval.run_consulta --casos eval/casos_consulta.yaml
+.venv\Scripts\python -m eval.run_consulta --casos eval/casos_empresa.yaml
+```
