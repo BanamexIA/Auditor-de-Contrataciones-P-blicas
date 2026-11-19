@@ -23,6 +23,9 @@ cada endpoint están en [`docs/contratos/`](contratos/README.md).
 | `POST` | [`/casos/<id>/senales/<senal_id>/decision`](#post-casosidsenalessenal_iddecision) | Decidir sobre una señal (HU-07) | Front |
 | `GET` | [`/casos/<id>/reportes`](#get-casosidreportes) | Versiones del reporte | Front |
 | `GET` | [`/casos/<id>/reportes/<version>/archivo`](#get-casosidreportesversionarchivo) | Descargar un reporte | Front |
+| `GET` | [`/agentes`](#get-agentes) | Laptops con Ollama registradas y su estado | Front, monitoreo |
+| `GET` | [`/agentes/<agente_id>`](#get-agentesagente_id) | Ver un agente | Front, monitoreo |
+| `POST` | [`/agentes/<agente_id>/verificar`](#post-agentesagente_idverificar) | Verificar ahora si un agente responde | Front, administrador |
 
 Lo que **no** pasa por HTTP: registrar señales, guardar reportes y escribir
 eventos de bitácora. El orquestador corre dentro del backend y usa funciones
@@ -75,6 +78,7 @@ Muestra `mensaje` al usuario; usa `codigo` para decidir qué hacer.
 | 404 | `caso_no_encontrado` | El caso no existe |
 | 404 | `senal_no_encontrada` | La señal no existe o no es de ese caso |
 | 404 | `reporte_no_encontrado` | No existe esa versión del reporte (o el caso) |
+| 404 | `agente_no_encontrado` | El agente no existe |
 | 404 | `ruta_no_encontrada` | La URL no existe |
 | 405 | `metodo_no_permitido` | Método equivocado (por ejemplo `GET` donde va `POST`) |
 | 409 | `transicion_invalida` | El cambio de estado no está permitido |
@@ -257,6 +261,43 @@ Descarga el archivo. Para mostrar el PDF en el front basta con un
   redirección solo; con `fetch` también.
 - **404** `reporte_no_encontrado` · **500** `reporte_corrupto`.
 
+## `GET /agentes`
+
+Agentes activos (laptops con Ollama) y el resultado de su última verificación.
+El backend los revisa solo cada `AGENTES_VERIFICAR_CADA_S` segundos (60 por
+defecto). El alta y la baja no son por API: las hace el administrador por CLI
+(ver [agentes.md](contratos/agentes.md)).
+
+```json
+{"agentes": [{
+  "id": 1, "usuario": "alean", "nombre_tailnet": "laptop-alean", "modelo": null,
+  "estado": "disponible", "activo": true,
+  "modelos": ["nomic-embed-text:latest", "qwen2.5:7b"], "version_ollama": "0.12.3",
+  "latencia_ms": 42.7, "ultimo_error": null,
+  "ultima_verificacion": "2026-11-15T07:10:00.512000Z", "created_at": "2026-11-15T07:00:00Z"
+}]}
+```
+
+| `estado` | Significado |
+|---|---|
+| `disponible` | Responde y tiene el modelo |
+| `sin_modelo` | Responde, pero no tiene el modelo requerido (`modelo` o `AGENT_MODEL`) |
+| `apagado` | No responde (`ultimo_error` dice por qué, por ejemplo `TimeoutError`) |
+| `desconocido` | Aún no se ha verificado |
+
+**200** · **503** `bd_no_disponible` si el registro no está configurado.
+
+## `GET /agentes/<agente_id>`
+
+**200** con el agente · **404** `agente_no_encontrado`.
+
+## `POST /agentes/<agente_id>/verificar`
+
+Verifica en este momento. No recibe cuerpo: usa el nombre registrado y nunca
+una dirección enviada por el cliente.
+
+**200** con el agente actualizado · **404** `agente_no_encontrado`.
+
 ---
 
 ## Para el orquestador
@@ -270,6 +311,7 @@ Funciones de Python dentro del backend (no HTTP):
 | `repo.registrar_evento(caso_id, evento, detalle)` | Registrar `sql_ejecutado`, `reglas_evaluadas`, etc. |
 | `repo.registrar_senales(caso_id, [{"tipo": …, "datos": {…}}])` | Guardar las señales de la Tool 1 |
 | `servicio.guardar_reporte(repo, almacen, caso_id, contenido, formato)` | Guardar el reporte del Agente Reportes |
+| `agentes.servicio.seleccionar_agente(repo_agentes, usuario)` | Elegir una laptop disponible (verificada en ese momento); devuelve `url` y `modelo` para `OllamaClient`. Si ninguna responde lanza `AgenteNoDisponible`, cuyo mensaje es el motivo para bloquear el caso |
 
 `repo` es `RepositorioCasosSQL` (`backend/casos/repositorio.py`); el almacén
 sale de `almacen_desde_entorno()` (`backend/reportes/almacen.py`).

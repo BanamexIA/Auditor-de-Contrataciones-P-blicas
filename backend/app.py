@@ -5,6 +5,10 @@ from sqlalchemy import URL, Engine, create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 from werkzeug.exceptions import HTTPException
 
+from backend.agentes.api import bp as agentes_bp
+from backend.agentes.repositorio import RepositorioAgentes, RepositorioAgentesSQL
+from backend.agentes.servicio import MonitorAgentes
+from backend.agentes.verificacion import ClienteHttp
 from backend.casos.api import bp as casos_bp
 from backend.casos.repositorio import RepositorioCasos, RepositorioCasosSQL
 from backend.reportes.almacen import AlmacenReportes, almacen_desde_entorno
@@ -26,6 +30,8 @@ def create_app(
     engine: Engine | None = None,
     repositorio: RepositorioCasos | None = None,
     almacen: AlmacenReportes | None = None,
+    repositorio_agentes: RepositorioAgentes | None = None,
+    http_agentes: ClienteHttp | None = None,
 ) -> Flask:
     app = Flask(__name__)
     app.json.ensure_ascii = False
@@ -34,8 +40,18 @@ def create_app(
     if repositorio is None:
         engine = engine or engine_desde_entorno()
         repositorio = RepositorioCasosSQL(engine)
+    if repositorio_agentes is None and engine is not None:
+        repositorio_agentes = RepositorioAgentesSQL(engine)
     app.extensions["repositorio_casos"] = repositorio
     app.extensions["almacen_reportes"] = almacen or almacen_desde_entorno()
+    app.extensions["repositorio_agentes"] = repositorio_agentes
+    app.extensions["http_agentes"] = http_agentes
+
+    intervalo = float(os.environ.get("AGENTES_VERIFICAR_CADA_S", "0") or 0)
+    if intervalo > 0 and repositorio_agentes is not None:
+        app.extensions["monitor_agentes"] = MonitorAgentes(
+            repositorio_agentes, intervalo, **({"http": http_agentes} if http_agentes else {})
+        ).iniciar()
 
     @app.get("/health")
     def health():
@@ -54,6 +70,7 @@ def create_app(
         return jsonify(status="ok", database="connected")
 
     app.register_blueprint(casos_bp)
+    app.register_blueprint(agentes_bp)
     _errores_en_json(app)
     return app
 
