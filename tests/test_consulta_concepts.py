@@ -38,11 +38,34 @@ class MissingConceptTests(unittest.TestCase):
         self.assertIn("no registran cancelaciones de contratos", reason)
         self.assertIn("ninguna otra columna lo sustituye", reason)
 
+    def test_situation_in_the_69b_is_a_gap_of_the_views(self):
+        """A5, mejora 18 (f04)."""
+        for question in (
+            "¿Qué situación tiene Grupo Elibza en el listado 69-B?",
+            "¿Qué proveedores del 69B son definitivos?",
+            "¿Cuántos contribuyentes desvirtuados del 69-B tienen contratos?",
+            "¿Grupo Elibza es presunto en el 69-B?",
+        ):
+            with self.subTest(pregunta=question):
+                self.assertIn("situación del contribuyente", missing_concept(question) or "")
+        reason = missing_concept_reason(missing_concept("¿Qué situación tiene Grupo Elibza en el 69-B?"))
+        self.assertIn("Las vistas del agente no tienen", reason)
+        self.assertIn("revisión humana", reason)
+
+    def test_other_69b_questions_are_not_caught(self):
+        for question in (
+            "¿Cuántos contratos tienen coincidencia con el 69-B?",
+            "¿Cuál es la situación de los contratos de 2024?",
+            "¿Qué contratos son definitivos?",
+        ):
+            with self.subTest(pregunta=question):
+                self.assertIsNone(missing_concept(question))
+
     def test_no_reference_question_with_data_is_caught(self):
         questions = []
-        for name in ("golden_set.yaml", "casos_consulta.yaml", "casos_empresa.yaml", "examples.yaml"):
+        for name in ("golden_set.yaml", "casos_consulta.yaml", "casos_empresa.yaml", "casos_empresa_69b.yaml", "examples.yaml"):
             for case in yaml.safe_load((ROOT / "eval" / name).read_text(encoding="utf-8")):
-                if case.get("id") != "c10":
+                if case.get("id") not in ("c10", "f04"):
                     questions.append(case["pregunta"])
         questions += ["¿Cuánto se gastó en adjudicaciones directas?", "Muestra la página 2 de resultados."]
         for question in questions:

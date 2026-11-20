@@ -6,7 +6,7 @@ from typing import Any, Callable, Sequence
 from psycopg import DataError, ProgrammingError
 
 from agents.consulta.concepts import missing_concept, missing_concept_reason, plain_text
-from agents.consulta.coverage import Coverage, check_coverage
+from agents.consulta.coverage import Coverage, check_coverage, contradicted_no_data
 from agents.consulta.prompt import (
     ResponseFormatError,
     build_user_prompt,
@@ -53,9 +53,12 @@ def answer_question(
     successful answer carries the rows in "filas". Other database errors, such
     as a lost connection or the time limit, propagate.
 
+    A "sin_datos" whose reason names years that do have contracts is also
+    retried (stage "cobertura", A5, mejora 17).
+
     Every answer carries "intentos_fallidos": for each failed attempt, its
-    number, the stage that rejected it ("formato", "validador" or "base"), the
-    error and the SQL the model proposed, if any (A5, mejora 9).
+    number, the stage that rejected it ("formato", "validador", "cobertura" or
+    "base"), the error and the SQL the model proposed, if any (A5, mejora 9).
     """
     user_prompt = build_user_prompt(question, clarifications)
     prompt = user_prompt
@@ -86,6 +89,20 @@ def answer_question(
             if result["tipo"] == "sql":
                 no_data["sql_descartado"] = result["sql"]
             return {**no_data, "intentos_fallidos": failed}
+        contradiction = (
+            contradicted_no_data(result["motivo"], coverage) if result["tipo"] == "sin_datos" else None
+        )
+        if contradiction:
+            # A5, mejora 17: periods without data are the coverage check's call, from the SQL.
+            error = f"La respuesta dice que no hay datos, pero {contradiction}."
+            rejected_sql = None
+            failed.append(_failed_attempt(attempt, "cobertura", error, None))
+            prompt = (
+                f"{user_prompt}\n\nTu respuesta anterior dijo que no hay datos, pero {contradiction}. "
+                "Escribe el SQL: si el periodo está incompleto, el sistema agrega el aviso. "
+                "Responde solo con el objeto JSON."
+            )
+            continue
         if result["tipo"] != "sql":
             return {**result, "intentos_fallidos": failed}
         result = _apply_coverage(result, coverage)

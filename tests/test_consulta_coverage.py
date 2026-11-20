@@ -3,7 +3,7 @@ from pathlib import Path
 
 import yaml
 
-from agents.consulta.coverage import COVERAGE_QUERY, Coverage, check_coverage, format_years
+from agents.consulta.coverage import COVERAGE_QUERY, Coverage, check_coverage, contradicted_no_data, format_years
 from agents.consulta.prompt import BUILT_IN_EXAMPLES
 from agents.consulta.validator import validate_sql
 
@@ -232,3 +232,34 @@ class DateTruncNotesTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ContradictedNoDataTests(unittest.TestCase):
+    """A5, mejora 17: a "no data" reason that names years with contracts."""
+
+    def test_q17_reason_is_contradicted_with_the_partial_year(self):
+        self.assertEqual(
+            contradicted_no_data("El histórico de CompraNet no registra contratos con inicio en 2024.", COVERAGE),
+            "CompraNet histórico sí tiene contratos con inicio en 2024 (2024 incompleto)",
+        )
+
+    def test_a_year_without_data_is_not_contradicted(self):
+        for reason in (
+            "No hay contratos con inicio en 2025.",
+            "No hay datos de 2024 ni de 2025.",
+            "ComprasMX no tiene contratos de 2024.",
+        ):
+            with self.subTest(motivo=reason):
+                self.assertIsNone(contradicted_no_data(reason, COVERAGE))
+
+    def test_a_year_with_data_in_any_source_when_none_is_named(self):
+        message = contradicted_no_data("No hay registros de 2026.", COVERAGE)
+        self.assertEqual(message, "ComprasMX sí tiene contratos con inicio en 2026")
+
+    def test_reasons_that_are_not_about_missing_years_are_left_alone(self):
+        for reason in (
+            "Las fuentes no registran pagos ni fechas de pago.",
+            "El importe de 2024 no es gasto pagado.",
+        ):
+            with self.subTest(motivo=reason):
+                self.assertIsNone(contradicted_no_data(reason, COVERAGE))

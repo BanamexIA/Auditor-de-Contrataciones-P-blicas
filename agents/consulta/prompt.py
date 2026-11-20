@@ -5,8 +5,14 @@ import re
 from typing import Any, Sequence
 
 from agents.consulta.concepts import MISSING_CONCEPTS
-from agents.consulta.providers import normalize_provider_literals
-from agents.consulta.validator import MAX_SQL_ROWS, add_missing_limit, validate_sql
+from agents.consulta.providers import add_suffix_variants, normalize_provider_literals
+from agents.consulta.validator import (
+    MAX_SQL_ROWS,
+    add_missing_limit,
+    add_order_tiebreaker,
+    fix_alias_typos,
+    validate_sql,
+)
 
 
 RESPONSE_TYPES = ("sql", "aclaracion", "sin_datos")
@@ -23,9 +29,15 @@ def provider_note(name: str) -> str:
     return f"{PROVIDER_NOTE_PREFIX}'{name}' en proveedor_normalizado, la forma normalizada del ETL."
 
 
+SUFFIX_NOTE = (
+    "El proveedor también se buscó con su tipo de sociedad al final (como S A DE C V), "
+    "porque el ETL lo conserva en parte de los contratos."
+)
+
+
 def is_system_note(text: str) -> bool:
     """Notes written by code, which the coverage filter must keep even if a name contains "completo"."""
-    return text == LIMIT_ADDED_NOTE or text.startswith(PROVIDER_NOTE_PREFIX)
+    return text in (LIMIT_ADDED_NOTE, SUFFIX_NOTE) or text.startswith(PROVIDER_NOTE_PREFIX)
 
 # Rules distilled from docs/capa_semantica.md; keep both in sync.
 DATA_RULES = """Reglas de los datos:
@@ -221,11 +233,16 @@ def parse_response(text: str) -> dict[str, Any]:
         )
     if response_type == "sql":
         sql, limit_added = add_missing_limit(_required_text(payload, "sql"))
+        sql, _ = fix_alias_typos(sql)
+        sql, _ = add_order_tiebreaker(sql)
         sql, providers = normalize_provider_literals(sql)
+        sql, searched = add_suffix_variants(sql)
         supuestos = _text_list(payload, "supuestos")
         if limit_added:
             supuestos.append(LIMIT_ADDED_NOTE)
         supuestos.extend(provider_note(name) for name in dict.fromkeys(providers))
+        if searched:
+            supuestos.append(SUFFIX_NOTE)
         return {
             "tipo": "sql",
             "sql": validate_sql(sql),

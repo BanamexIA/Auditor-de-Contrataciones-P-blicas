@@ -4,7 +4,13 @@ import unicodedata
 import unittest
 from pathlib import Path
 
-from agents.consulta.providers import normalize_provider, normalize_provider_literals
+from agents.consulta.providers import (
+    SUFFIX_TAILS,
+    add_suffix_variants,
+    normalize_provider,
+    normalize_provider_literals,
+    provider_variants,
+)
 from agents.consulta.validator import validate_sql
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -76,6 +82,52 @@ class NormalizeLiteralsTests(unittest.TestCase):
         ):
             with self.subTest(sql=query[:80]):
                 self.assertEqual(normalize_provider_literals(query), (query, []))
+
+
+class SuffixVariantsTests(unittest.TestCase):
+    """A5, mejora 19: f05 and f06 missed 'DISTRIBUIDORA UNIVERSAL TOBOSA S A DE C V'."""
+
+    def test_variants_start_with_the_name_without_suffix(self):
+        for name in ("DISTRIBUIDORA UNIVERSAL TOBOSA", "DISTRIBUIDORA UNIVERSAL TOBOSA S A DE C V"):
+            with self.subTest(nombre=name):
+                variants = provider_variants(name)
+                self.assertEqual(variants[0], "DISTRIBUIDORA UNIVERSAL TOBOSA")
+                self.assertIn("DISTRIBUIDORA UNIVERSAL TOBOSA S A DE C V", variants)
+                self.assertEqual(len(variants), len(SUFFIX_TAILS) + 1)
+
+    def test_the_longest_ending_is_removed(self):
+        self.assertEqual(provider_variants("ACME S DE R L DE C V")[0], "ACME")
+        self.assertEqual(provider_variants("ACME S DE R L MI")[0], "ACME")
+        self.assertEqual(provider_variants("S A")[0], "S A")
+
+    def test_equality_becomes_in_and_inequality_not_in(self):
+        sql, names = add_suffix_variants(
+            f"SELECT COUNT(*) FROM {CONTRATOS} WHERE proveedor_normalizado = 'DISTRIBUIDORA UNIVERSAL TOBOSA' "
+            f"AND proveedor_normalizado <> 'ACME' LIMIT 1"
+        )
+        self.assertIn("proveedor_normalizado IN ('DISTRIBUIDORA UNIVERSAL TOBOSA', "
+                      "'DISTRIBUIDORA UNIVERSAL TOBOSA S A DE C V'", sql)
+        self.assertIn("NOT proveedor_normalizado IN ('ACME', 'ACME S A DE C V'", sql)
+        self.assertEqual(names, ["DISTRIBUIDORA UNIVERSAL TOBOSA", "ACME"])
+        validate_sql(sql)
+
+    def test_an_in_list_gets_every_variant_once(self):
+        sql, names = add_suffix_variants(
+            f"SELECT * FROM {CONTRATOS} AS c WHERE c.proveedor_normalizado IN ('ACME', 'ACME S A DE C V') LIMIT 5"
+        )
+        self.assertEqual(sql.count("'ACME S A DE C V'"), 1)
+        self.assertEqual(names, ["ACME"])
+
+    def test_leaves_like_other_columns_and_subqueries_alone(self):
+        for query in (
+            f"SELECT * FROM {CONTRATOS} WHERE proveedor_normalizado LIKE 'ACME%' LIMIT 5",
+            f"SELECT * FROM {CONTRATOS} WHERE proveedor = 'ACME' LIMIT 5",
+            f"SELECT * FROM {CONTRATOS} WHERE proveedor_normalizado = '' LIMIT 5",
+            f"SELECT * FROM {CONTRATOS} WHERE proveedor_normalizado IN (SELECT proveedor_normalizado FROM {CONTRATOS}) LIMIT 5",
+            "SELECT FROM WHERE",
+        ):
+            with self.subTest(sql=query[:90]):
+                self.assertEqual(add_suffix_variants(query), (query, []))
 
 
 if __name__ == "__main__":

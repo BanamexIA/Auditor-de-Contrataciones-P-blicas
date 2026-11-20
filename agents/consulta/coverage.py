@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 import statistics
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any, Iterable
@@ -75,6 +77,53 @@ class Coverage:
             f"{SOURCE_NAMES.get(source, source)}: {format_years(years)}"
             for source, years in sorted(self.years.items())
         )
+
+
+_YEAR_IN_TEXT = re.compile(r"\b((?:19|20)\d{2})\b")
+# A "no data" claim, over the text without accents and in lowercase.
+_NO_DATA_TALK = re.compile(
+    r"\b(no (hay|tiene|tienen|registra|registran|existen?|cuenta con)|sin|ningun\w*)\b"
+    r".{0,40}\b(contratos?|datos|registros|informacion)\b"
+)
+SOURCE_WORDS = {"comprasmx": ("comprasmx",), "historico": ("historico", "compranet")}
+
+
+def contradicted_no_data(motivo: str, coverage: Coverage) -> str | None:
+    """Which years of a "no data" reason do have contracts, or None (A5, mejora 17).
+
+    On 2026-11-20 the model answered q17 with "El histórico de CompraNet no
+    registra contratos con inicio en 2024", which has 1,836. The claim is
+    contradicted only when every year it names has contracts in the sources it
+    names (in any source if it names none), so "no hay contratos en 2025" stands.
+    """
+    plain = _plain(motivo)
+    years = {int(year) for year in _YEAR_IN_TEXT.findall(plain)}
+    if not years or not _NO_DATA_TALK.search(plain):
+        return None
+    sources = {
+        source for source, words in SOURCE_WORDS.items() if any(word in plain for word in words)
+    } or set(coverage.years)
+    found: dict[str, set[int]] = {}
+    for year in years:
+        holders = [source for source in sorted(sources) if year in coverage.years.get(source, ())]
+        if not holders:
+            return None
+        for source in holders:
+            found.setdefault(source, set()).add(year)
+    parts = []
+    for source, source_years in sorted(found.items()):
+        partial = source_years & coverage.partial_years.get(source, frozenset())
+        note = f" ({format_years(partial)} incompleto)" if partial else ""
+        parts.append(
+            f"{SOURCE_NAMES.get(source, source)} sí tiene contratos con inicio en "
+            f"{format_years(source_years)}{note}"
+        )
+    return "; ".join(parts)
+
+
+def _plain(text: str) -> str:
+    decomposed = unicodedata.normalize("NFKD", text.casefold())
+    return "".join(char for char in decomposed if not unicodedata.combining(char))
 
 
 @dataclass

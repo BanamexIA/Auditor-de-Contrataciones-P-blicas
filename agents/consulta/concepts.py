@@ -26,6 +26,18 @@ MISSING_CONCEPTS = (
     (re.compile(r"\bpenaliz\w*|\bmulta(s|d[oa]s?)?\b"), "penalizaciones ni multas"),
 )
 
+# Data that exists in a source but not in the agent's views (A5, mejora 18). On
+# 2026-11-20 f04 asked for a company's situation in the 69-B and the model
+# listed its matches instead. Remove an entry when the views gain the data
+# (decision 7 of docs/vistas_estrella.md).
+_SITUATION_WORDS = r"(situacion|estatus|status|presunt\w*|definitiv\w*|desvirtu\w*|sentencia favorable)"
+VIEW_GAPS = (
+    (
+        re.compile(rf"\b{_SITUATION_WORDS}\b.*\b69\W?b\b|\b69\W?b\b.*\b{_SITUATION_WORDS}\b"),
+        "la situación del contribuyente en el listado 69-B (presunto, definitivo, desvirtuado o sentencia favorable)",
+    ),
+)
+
 
 def plain_text(text: str) -> str:
     """Lowercase text without accents, so "Cancelación" and "cancelacion" match."""
@@ -34,15 +46,21 @@ def plain_text(text: str) -> str:
 
 
 def missing_concept(question: str) -> str | None:
-    """Returns what the sources lack if the question asks about it, or None."""
+    """Returns what the sources or the views lack if the question asks about it, or None."""
     plain = plain_text(question)
-    for pattern, concept in MISSING_CONCEPTS:
+    for pattern, concept in MISSING_CONCEPTS + VIEW_GAPS:
         if pattern.search(plain):
             return concept
     return None
 
 
 def missing_concept_reason(concept: str) -> str:
+    if concept in {gap for _, gap in VIEW_GAPS}:
+        return (
+            f"Las vistas del agente no tienen {concept}, así que no se puede afirmar. "
+            "Una coincidencia con el listado es una señal para revisión humana; la situación "
+            "se confirma en el listado publicado por el SAT."
+        )
     return (
         f"Las fuentes no registran {concept}. No hay un dato equivalente en las vistas, "
         "y ninguna otra columna lo sustituye."

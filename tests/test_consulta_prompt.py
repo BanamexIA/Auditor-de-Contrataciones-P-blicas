@@ -9,9 +9,11 @@ from agents.consulta.prompt import (
     BOOLEAN_COLUMNS,
     BUILT_IN_EXAMPLES,
     LIMIT_ADDED_NOTE,
+    SUFFIX_NOTE,
     ResponseFormatError,
     build_system_prompt,
     build_user_prompt,
+    is_system_note,
     parse_response,
     provider_note,
 )
@@ -155,14 +157,40 @@ class ParseResponseTests(unittest.TestCase):
         self.assertTrue(response["sql"].endswith(f"LIMIT {MAX_SQL_ROWS}"))
         self.assertEqual(response["supuestos"], ["Supuesto del modelo.", LIMIT_ADDED_NOTE])
 
+    def test_a_list_without_limit_gets_the_limit_and_the_tiebreaker_without_a_new_note(self):
+        response = parse_response(json.dumps({
+            "tipo": "sql",
+            "sql": "SELECT codigo_contrato, fecha_inicio FROM clean.v_contratos_agente "
+                   "ORDER BY fecha_inicio DESC",
+        }))
+        self.assertTrue(
+            response["sql"].endswith(f"ORDER BY fecha_inicio DESC, codigo_contrato LIMIT {MAX_SQL_ROWS}")
+        )
+        self.assertEqual(response["supuestos"], [LIMIT_ADDED_NOTE])
+
     def test_provider_name_is_normalized_with_a_note(self):
         response = parse_response(json.dumps({
             "tipo": "sql",
             "sql": "SELECT COUNT(*) AS contratos FROM clean.v_contratos_agente "
                    "WHERE fuente = 'comprasmx' AND proveedor_normalizado = 'Molinera de México' LIMIT 1",
         }))
-        self.assertIn("proveedor_normalizado = 'MOLINERA DE MEXICO'", response["sql"])
-        self.assertEqual(response["supuestos"], [provider_note("MOLINERA DE MEXICO")])
+        self.assertIn("proveedor_normalizado IN ('MOLINERA DE MEXICO', 'MOLINERA DE MEXICO S A DE C V'", response["sql"])
+        self.assertEqual(response["supuestos"], [provider_note("MOLINERA DE MEXICO"), SUFFIX_NOTE])
+
+    def test_alias_typo_is_fixed_before_validating(self):
+        """A5, mejora 15: q08's first attempt, which used to cost the retry."""
+        response = parse_response(json.dumps({
+            "tipo": "sql",
+            "sql": "SELECT c.codigo_contrato, c_fuente, c.fecha_inicio FROM clean.v_contratos_agente AS c "
+                   "JOIN clean.v_coincidencias_69b_agente AS m ON m.codigo_contrato = c.codigo_contrato "
+                   "WHERE m.requiere_revision_humana ORDER BY c.fecha_inicio DESC LIMIT 20",
+        }))
+        self.assertIn("SELECT c.codigo_contrato, c.fuente, c.fecha_inicio", response["sql"])
+        self.assertIn("ORDER BY c.fecha_inicio DESC, c.codigo_contrato LIMIT 20", response["sql"])
+        self.assertEqual(response["supuestos"], [])
+
+    def test_system_notes_survive_the_coverage_filter(self):
+        self.assertTrue(is_system_note(SUFFIX_NOTE))
 
     def test_sql_with_its_own_limit_gets_no_note(self):
         response = parse_response(json.dumps({"tipo": "sql", "sql": VALID_SQL}))

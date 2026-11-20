@@ -130,8 +130,8 @@
       AND institucion IS NOT NULL
     GROUP BY institucion
     ORDER BY contratos DESC, institucion
-    LIMIT 50
-  notas: Institución solo está disponible para ComprasMX; la fecha refiere a inicio del contrato.
+    LIMIT 200
+  notas: Institución solo está disponible para ComprasMX; la fecha refiere a inicio del contrato. Cambiado el 2026-11-20 de LIMIT 50 a LIMIT 200 porque la pregunta pide todas las instituciones (hay 784) y, desde la mejora 11, el LIMIT es un tope y no un recorte; el agente respondía bien y se calificaba mal.
 - id: q11
   pregunta: Muestra contratos ComprasMX con fecha de inicio en 2025 y su unidad compradora.
   dificultad: media

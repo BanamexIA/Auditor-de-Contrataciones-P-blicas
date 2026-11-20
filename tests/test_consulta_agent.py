@@ -309,3 +309,36 @@ class ExecutionRetryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ContradictedNoDataRetryTests(unittest.TestCase):
+    """A5, mejora 17: q17 said there were no 2024 contracts in the histórico."""
+
+    Q17_NO_DATA = json.dumps({
+        "tipo": "sin_datos",
+        "motivo": "El histórico de CompraNet no registra contratos con inicio en 2024.",
+    })
+    Q17_SQL = (
+        "SELECT moneda, SUM(importe) AS importe_registrado FROM clean.v_contratos_agente "
+        "WHERE fuente = 'historico' AND fecha_inicio >= DATE '2024-01-01' AND fecha_inicio < DATE '2025-01-01' "
+        "GROUP BY moneda ORDER BY moneda LIMIT 20"
+    )
+
+    def test_is_retried_with_the_years_that_have_data(self):
+        client = FakeClient(self.Q17_NO_DATA, sql_answer(self.Q17_SQL))
+        result = ask(client)
+        self.assertEqual(result["tipo"], "sql")
+        self.assertIn("sí tiene contratos con inicio en 2024", client.prompts[1])
+        self.assertEqual(result["intentos_fallidos"][0]["etapa"], "cobertura")
+        self.assertTrue(any("2024" in note for note in result["supuestos"]))
+
+    def test_twice_is_an_error_not_a_false_no_data(self):
+        result = ask(FakeClient(self.Q17_NO_DATA, self.Q17_NO_DATA))
+        self.assertEqual(result["tipo"], "error")
+        self.assertEqual([item["etapa"] for item in result["intentos_fallidos"]], ["cobertura", "cobertura"])
+
+    def test_a_true_no_data_is_kept(self):
+        answer = json.dumps({"tipo": "sin_datos", "motivo": "No hay contratos con inicio en 2025."})
+        result = ask(FakeClient(answer))
+        self.assertEqual(result["tipo"], "sin_datos")
+        self.assertEqual(result["intentos_fallidos"], [])

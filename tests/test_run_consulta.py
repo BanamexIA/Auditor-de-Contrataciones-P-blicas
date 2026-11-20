@@ -76,38 +76,51 @@ class GoldenSetTests(unittest.TestCase):
 
 
 class CompanyCasesTests(unittest.TestCase):
-    """A5, mejora 8: eval/casos_empresa.yaml, the company questions of the demo."""
+    """A5: the company questions of the demo (mejora 8) and the new 69-B ones."""
+
+    FILES = ("casos_empresa.yaml", "casos_empresa_69b.yaml")
 
     def setUp(self):
-        self.path = Path(__file__).resolve().parents[1] / "eval" / "casos_empresa.yaml"
-        self.cases = load_cases(self.path)
+        self.folder = Path(__file__).resolve().parents[1] / "eval"
+        self.files = {name: load_cases(self.folder / name) for name in self.FILES}
 
     def test_cases_are_new_and_cover_sql_and_no_data(self):
         seen = {item["pregunta"].casefold() for item in BUILT_IN_EXAMPLES}
         for name in ("golden_set.yaml", "casos_consulta.yaml", "examples.yaml"):
-            others = yaml.safe_load((self.path.parent / name).read_text(encoding="utf-8"))
+            others = yaml.safe_load((self.folder / name).read_text(encoding="utf-8"))
             seen |= {case["pregunta"].casefold() for case in others}
-        ids = [case["id"] for case in self.cases]
+        ids = [case["id"] for cases in self.files.values() for case in cases]
         self.assertEqual(len(ids), len(set(ids)))
-        self.assertGreaterEqual(sum(case["tipo_esperado"] == "sql" for case in self.cases), 5)
-        self.assertGreaterEqual(sum(case["tipo_esperado"] == "sin_datos" for case in self.cases), 1)
-        for case in self.cases:
-            with self.subTest(caso=case["id"]):
-                self.assertNotIn(case["pregunta"].casefold(), seen)
-                self.assertTrue(case["notas"].strip())
+        for name, cases in self.files.items():
+            with self.subTest(archivo=name):
+                self.assertGreaterEqual(sum(case["tipo_esperado"] == "sql" for case in cases), 5)
+                self.assertGreaterEqual(sum(case["tipo_esperado"] == "sin_datos" for case in cases), 1)
+            for case in cases:
+                with self.subTest(caso=case["id"]):
+                    self.assertNotIn(case["pregunta"].casefold(), seen)
+                    self.assertTrue(case["notas"].strip())
+                seen.add(case["pregunta"].casefold())
 
     def test_reference_sql_passes_the_validator_and_the_coverage_check(self):
         coverage = Coverage.from_rows(M9_ROWS)
-        for case in self.cases:
-            sql = case.get("sql_esperado") or case.get("sql_ingenuo")
-            with self.subTest(caso=case["id"]):
-                check = check_coverage(validate_sql(sql), coverage)
-                self.assertEqual(check.sin_datos is not None, case["tipo_esperado"] == "sin_datos")
+        for cases in self.files.values():
+            for case in cases:
+                sql = case.get("sql_esperado") or case.get("sql_ingenuo")
+                if not sql:  # f04: the model must say "sin datos" by itself; there is no naive SQL
+                    continue
+                with self.subTest(caso=case["id"]):
+                    check = check_coverage(validate_sql(sql), coverage)
+                    self.assertEqual(check.sin_datos is not None, case["tipo_esperado"] == "sin_datos")
 
-    def test_no_question_is_mistaken_for_a_missing_concept(self):
-        for case in self.cases:
-            with self.subTest(caso=case["id"]):
-                self.assertIsNone(missing_concept(case["pregunta"]))
+    def test_only_f04_is_caught_as_a_missing_concept(self):
+        """f04 asks for the 69-B situation, which the views lack (A5, mejora 18)."""
+        for cases in self.files.values():
+            for case in cases:
+                with self.subTest(caso=case["id"]):
+                    if case["id"] == "f04":
+                        self.assertIsNotNone(missing_concept(case["pregunta"]))
+                    else:
+                        self.assertIsNone(missing_concept(case["pregunta"]))
 
 
 class CompareResultsTests(unittest.TestCase):

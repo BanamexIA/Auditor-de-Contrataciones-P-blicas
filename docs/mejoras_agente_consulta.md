@@ -114,6 +114,15 @@ filas). Los casos de empresa mostraron que el agente buscaba la empresa en
 | 11 | `LIMIT 200` salvo que la pregunta pida un número de filas: es un tope, no un recorte | q18 | `prompt.py` |
 | 12 | Proveedores: regla y ejemplo resuelto (empresa ficticia) para buscar por `proveedor_normalizado`, y `providers.py` pasa el nombre que escriba el modelo a la forma del ETL (mayúsculas, sin acentos ni "SA DE CV"), con un supuesto que lo dice | e01 a e05 | `prompt.py`, `providers.py` |
 | 13 | La regla de booleanos aclara que `fecha_inicio_estado` es el estado y `fecha_inicio_valida` solo sí o no | q15 | `prompt.py` |
+| 14 | Si una lista selecciona `codigo_contrato` y tiene `ORDER BY` y `LIMIT`, el código agrega `codigo_contrato` al final del `ORDER BY` como desempate (2026-11-20) | q08 | `validator.py` (`add_order_tiebreaker`), `prompt.py` |
+
+**Por qué la 14:** el SQL que escribe el modelo para q08 ordena solo por
+`fecha_inicio`. Si varios contratos comparten la fecha del lugar 20, PostgreSQL
+puede devolver cualquiera de ellos. La base mostró después que en q08 no hay
+empate en ese corte (el 20 es del 2019-03-01 y el 21 del 2019-01-01), así que
+q08 fallaba por otra razón (ver la tercera ronda). La regla se queda porque
+hace que la misma pregunta devuelva siempre los mismos contratos. Ningún SQL
+esperado cambia con ella: todos ya desempatan.
 
 **Prueba rápida con la base (sin repetir):** q07, q08, q15 y q18 aciertan (q08
 con la pista de la mejora 10 en el reintento). En los casos de empresa aciertan
@@ -121,4 +130,74 @@ e01, e02 y e04; e03 confundió el nombre con un tipo de procedimiento y e05
 siguió buscando en `nombre_de_la_uc`. Falta la medición completa.
 
 **Los casos de empresa ya no son preguntas nuevas:** la mejora 12 se ajustó con
-ellos. Para medir si el agente generaliza hacen falta casos de empresa nuevos.
+ellos. Para medir si el agente generaliza está `eval/casos_empresa_69b.yaml`:
+6 casos con dos empresas con coincidencia en el 69-B, una por RFC (Grupo
+Elibza, ComprasMX) y otra solo por nombre (Distribuidora Universal Tobosa,
+histórico), más una pregunta por la situación del 69-B, que debe dar "sin
+datos".
+
+**Hallazgo de datos:** en 420,137 contratos del histórico,
+`proveedor_normalizado` conserva "S A DE C V" porque la regla del ETL quita la
+puntuación antes que el sufijo. Una búsqueda exacta por el nombre de la empresa
+no los encuentra (f05 y f06 lo van a mostrar). Está como decisión 9 en
+[vistas_estrella.md](vistas_estrella.md).
+
+## Segunda medición (2026-11-20)
+
+| Medición | 2026-11-19 | 2026-11-20 | Análisis |
+|---|---|---|---|
+| Golden set, 3 repeticiones | 75.0 % | **75.0 %**, consistencia 20 de 20 | [consulta_20261120_142056](../eval/results/consulta_20261120_142056/analisis.md) |
+| Casos de A2 | 10 de 13 | **10 de 13** | [consulta_casos_consulta_20261120_142157](../eval/results/consulta_casos_consulta_20261120_142157/analisis.md) |
+| Casos de empresa | SQL 1 de 5 | **SQL 3 de 5** | [consulta_casos_empresa_20261120_142349](../eval/results/consulta_casos_empresa_20261120_142349/analisis.md) |
+| Casos del 69-B | — | **3 de 6** | [consulta_casos_empresa_69b_20261120_142427](../eval/results/consulta_casos_empresa_69b_20261120_142427/analisis.md) |
+
+Se arreglaron q07 y q15. Siguen fallando q08 (gasta los dos intentos) y q18
+(elige `descripcion_excepcion`), y aparecieron q10 (el esperado recortaba a 50)
+y q17 (dijo que no hay 2024). En los casos del 69-B fallaron f04 (afirmó la
+situación con las coincidencias) y f05 y f06 (el sufijo "S A DE C V").
+
+## Tercera ronda (2026-11-20)
+
+| # | Mejora | Corrige | Dónde |
+|---|---|---|---|
+| 15 | El código cambia `alias_columna` por `alias.columna` antes de validar, solo si así se resuelve la columna. El reintento queda para errores reales | q08 | `validator.py` (`fix_alias_typos`), `prompt.py` |
+| 16 | El validador rechaza un texto que una columna categórica nunca tiene (`fuente`, `tipo_procedimiento_norm`, `fecha_inicio_estado`, `nivel_confianza`) y lista sus valores; si parece un nombre, dice que se busque en `proveedor_normalizado` o `institucion` | e03 | `validator.py` |
+| 17 | Si el modelo responde "sin datos" para años que sí tienen contratos, se reintenta con lo que dice la cobertura (etapa `cobertura` en `intentos_fallidos`) | q17 | `coverage.py` (`contradicted_no_data`), `agent.py` |
+| 18 | La situación del contribuyente en el 69-B (presunto, definitivo, desvirtuado) responde "sin datos" desde el código: las vistas no la tienen | f04 | `concepts.py` (`VIEW_GAPS`) |
+| 19 | El proveedor se busca con y sin su tipo de sociedad al final (`S A DE C V`, `S DE R L DE C V` y otros que el ETL conserva), con un supuesto que lo dice. Sigue sirviendo cuando se corrija el ETL | f05, f06 | `providers.py` (`add_suffix_variants`), `prompt.py` |
+
+**Cambio de evaluación:** el esperado de q10 pasa de `LIMIT 50` a `LIMIT 200`.
+La pregunta pide todas las instituciones (hay 784) y, desde la mejora 11, el
+`LIMIT` es un tope y no un recorte. Sube la exactitud sin que el agente cambie.
+
+**Prueba rápida con la base (1 repetición):** golden set 19 de 20 (solo falla
+q18), casos de A2 10 de 13 (c01, c03 y c05, de la mejora 7), casos de empresa
+4 de 6 (e03 ahora pide aclaración y e05 sigue en `nombre_de_la_uc`) y casos del
+69-B 6 de 6. Falta la medición completa.
+
+**Cuidado:** las cinco mejoras salieron de errores de los casos que se miden,
+incluidos los del 69-B, que eran los que no se habían usado. Para saber si el
+agente generaliza hacen falta preguntas nuevas. Además, `qwen2.5:7b` no es del
+todo determinista entre corridas aunque la temperatura sea 0 (q17 dio "sin
+datos" en la medición y SQL en una prueba rápida), así que una prueba rápida
+puede acertar y la medición fallar.
+
+Pendientes: q18 (elección de columna, sin corrección para no ajustar el prompt
+a un caso), e05 (empresa buscada como unidad compradora) y la mejora 7.
+
+## Tercera medición (2026-11-20, 15:16)
+
+| Medición | 11-20 (14:20) | 11-20 (15:16) | Análisis |
+|---|---|---|---|
+| Golden set, 3 repeticiones | 75.0 % | **93.8 %**, consistencia 20 de 20 | [consulta_20261120_151617](../eval/results/consulta_20261120_151617/analisis.md) |
+| Casos de A2 | 10 de 13 | 10 de 13 | [consulta_casos_consulta_20261120_151759](../eval/results/consulta_casos_consulta_20261120_151759/analisis.md) |
+| Casos de empresa | 4 de 6 | 4 de 6 | [consulta_casos_empresa_20261120_151840](../eval/results/consulta_casos_empresa_20261120_151840/analisis.md) |
+| Casos del 69-B | 3 de 6 | **6 de 6** | [consulta_casos_empresa_69b_20261120_151914](../eval/results/consulta_casos_empresa_69b_20261120_151914/analisis.md) |
+
+**El golden set pasa la meta de 85 %.** Sin el cambio al esperado de q10 sería
+87.5 %. En el golden set solo falla q18. q17 acierta gracias al reintento de la
+mejora 17: el modelo sigue diciendo que no hay 2024.
+
+Antes de reportarlo como resultado de A5: las mejoras 15 a 19 salieron de los
+mismos casos que se miden, así que hace falta un conjunto de preguntas nuevas,
+sin usar, para saber cuánto generaliza el agente.

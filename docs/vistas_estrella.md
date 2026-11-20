@@ -91,8 +91,9 @@ LIMIT 20
 | 4 | ¿Vistas normales o materializadas? El hecho revisa `coincidencias_69b` por cada contrato y la dimensión de proveedor agrupa 2.4 millones de filas | Medir el tiempo con la consulta V7. Si es lento: índice en `coincidencias_69b(codigo_contrato)` o vistas materializadas que se refresquen después del ETL | Backend |
 | 5 | ¿El Agente Consulta consulta la estrella? | No por ahora: con dos vistas planas el modelo escribe menos uniones, y A4 y A5 se midieron así. Si se decide que sí, hay que actualizar `VIEW_COLUMNS`, el prompt y el golden set, y volver a medir | Equipo |
 | 6 | ¿La invitación a cuando menos tres personas es competitiva? | No (`es_competitivo = false`), provisional | Mario |
-| 7 | ¿Agregar la situación del 69-B también a `v_coincidencias_69b_agente`? | Sí, una columna `situacion_del_contribuyente`, cuando se resuelva la 2. Cambia una vista del agente, así que habría que actualizar `VIEW_COLUMNS` | Backend y Agente Consulta |
-| 8 | Número del archivo al moverlo a `etl/sql/` | El siguiente libre (hoy, `19_`) | Backend |
+| 7 | ¿Agregar la situación del 69-B también a `v_coincidencias_69b_agente`? | Sí, una columna `situacion_del_contribuyente`, cuando se resuelva la 2. Cambia una vista del agente, así que habría que actualizar `VIEW_COLUMNS` y quitar la entrada de `VIEW_GAPS` en `agents/consulta/concepts.py`, que hoy responde "sin datos" a esa pregunta | Backend y Agente Consulta |
+| 8 | Número del archivo al moverlo a `etl/sql/` | El siguiente libre. `19_` ya lo usa `19_bitacora_calidad.sql` en la rama `mcp` (2026-11-19), así que probablemente `20_` | Backend |
+| 9 | `proveedor_normalizado` conserva "S A DE C V" en 420,137 contratos del histórico (verificado el 2026-11-19): `normalize_provider` quita la puntuación antes que el sufijo, así que "S.A. de C.V." queda como "S A DE C V". La dimensión de proveedor separaría a una misma empresa en dos claves | Corregir el orden en `etl/build_clean.py` (quitar el sufijo con y sin puntos) y recalcular `clean`. El agente de Mario y `agents/consulta/providers.py` copian la regla: hay que cambiarlos a la vez. Mientras tanto, el Agente Consulta busca cada proveedor con y sin esos sufijos (A5, mejora 19, 2026-11-20); eso sigue funcionando después de la corrección | Backend, Mario y Agente Consulta |
 
 ## 5. Verificación contra la base
 

@@ -33,6 +33,21 @@ _SCHEMA = {"clean": {view: {column: "TEXT" for column in columns} for view, colu
 _COLUMN_IN_ERROR = re.compile(r"Column '([^']+)' could not be resolved|Unknown column: (\S+)")
 MAX_SQL_ROWS = 200
 QUERY_TIMEOUT_MS = 60_000
+# Values of the categorical columns, from the comments in etl/sql/07 and the data
+# (2026-11-20). A text outside the list returns nothing, so the validator rejects it.
+CATEGORY_VALUES = {
+    "fuente": ("comprasmx", "historico"),
+    "tipo_procedimiento_norm": (
+        "adjudicacion_directa", "invitacion_tres_personas", "licitacion_publica", "otro", "sin_dato",
+    ),
+    "fecha_inicio_estado": ("valida", "nula", "fuera_de_rango", "no_parseable"),
+    "nivel_confianza": ("alta", "media"),
+}
+_NAME_HINT = (
+    " Si es el nombre de un proveedor, búscalo en proveedor_normalizado; si es una institución, "
+    "en institucion."
+)
+CATEGORY_HINTS = {"fuente": _NAME_HINT, "tipo_procedimiento_norm": _NAME_HINT}
 
 # Statements that write data or change the schema, even when nested inside a SELECT.
 WRITE_EXPRESSIONS = (
@@ -89,6 +104,134 @@ def add_missing_limit(query: str, max_rows: int = MAX_SQL_ROWS) -> tuple[str, bo
     return tree.limit(max_rows).sql(dialect="postgres"), True
 
 
+TIEBREAK_COLUMN = "codigo_contrato"
+
+
+def add_order_tiebreaker(query: str) -> tuple[str, bool]:
+    """Ends ORDER BY with codigo_contrato in a SELECT that also has LIMIT.
+
+    Rows that tie on the ORDER BY come back in any order, so the LIMIT can keep
+    different contracts each time the same SQL runs (q08 in A5). Only applies
+    when codigo_contrato is a selected column, is not already in the ORDER BY,
+    and the query has no aggregate unless it groups by codigo_contrato. Returns
+    the query and whether it changed; anything else comes back unchanged.
+    """
+    try:
+        statements = sqlglot.parse(query, read="postgres")
+    except sqlglot.errors.ParseError:
+        return query, False
+    if len(statements) != 1 or not isinstance(statements[0], exp.Select):
+        return query, False
+    tree = statements[0]
+    order = tree.args.get("order")
+    distinct = tree.args.get("distinct")
+    if order is None or tree.args.get("limit") is None:
+        return query, False
+    if distinct is not None and distinct.args.get("on") is not None:
+        return query, False
+    key = _tiebreak_key(tree)
+    if key is None or _orders_by(order, *key):
+        return query, False
+    group = tree.args.get("group")
+    if group is not None:
+        if not any(_is_tiebreak_column(item) for item in group.expressions):
+            return query, False
+    elif any(item.find(exp.AggFunc) for item in tree.expressions):
+        return query, False
+    tree.order_by(key[1], append=True, copy=False)
+    return tree.sql(dialect="postgres"), True
+
+
+def _is_tiebreak_column(node: exp.Expression) -> bool:
+    return isinstance(node, exp.Column) and node.name == TIEBREAK_COLUMN
+
+
+def _tiebreak_key(tree: exp.Select) -> tuple[int, exp.Expression] | None:
+    """Position and ORDER BY expression of the first selected codigo_contrato."""
+    for position, item in enumerate(tree.expressions, start=1):
+        if _is_tiebreak_column(item):
+            return position, item.copy()
+        if isinstance(item, exp.Alias) and _is_tiebreak_column(item.this):
+            return position, exp.column(item.alias)
+    return None
+
+
+def _orders_by(order: exp.Order, position: int, expression: exp.Expression) -> bool:
+    """Whether the ORDER BY already uses codigo_contrato, its alias or its position."""
+    names = {TIEBREAK_COLUMN, expression.name}
+    for ordered in order.expressions:
+        target = ordered.this
+        if isinstance(target, exp.Literal) and not target.is_string and target.name == str(position):
+            return True
+        if any(column.name in names for column in target.find_all(exp.Column)):
+            return True
+    return False
+
+
+MAX_ALIAS_FIXES = 5
+
+
+def fix_alias_typos(query: str) -> tuple[str, list[str]]:
+    """Rewrites alias_columna as alias.columna when only that reading resolves (A5, mejora 15).
+
+    On 2026-11-20 q08 wrote c_fuente in its first attempt and, told to write
+    c.fuente, made a different mistake in the retry, so it ran out of attempts.
+    Only a column that sqlglot cannot resolve is touched, and only when its
+    prefix is the alias of an approved view that has the rest of the name, so a
+    name defined in the query (such as COUNT(*) AS c_total) stays as it is.
+    Returns the query and the fixes made ("c_fuente -> c.fuente").
+    """
+    try:
+        statements = sqlglot.parse(query, read="postgres")
+    except sqlglot.errors.ParseError:
+        return query, []
+    if len(statements) != 1 or not isinstance(statements[0], exp.Select):
+        return query, []
+    tree = statements[0]
+    fixes: list[str] = []
+    for _ in range(MAX_ALIAS_FIXES):
+        typo = _unresolved_alias_typo(tree)
+        if typo is None:
+            break
+        column, alias, rest = typo
+        for node in list(tree.find_all(exp.Column)):
+            if not node.table and node.name.lower() == column:
+                node.replace(exp.column(rest, table=alias))
+        fixes.append(f"{column} -> {alias}.{rest}")
+    if not fixes:
+        return query, []
+    return tree.sql(dialect="postgres"), fixes
+
+
+def _unresolved_alias_typo(tree: exp.Select) -> tuple[str, str, str] | None:
+    try:
+        qualify(tree.copy(), schema=_SCHEMA, dialect="postgres", validate_qualify_columns=True,
+                quote_identifiers=False, identify=False)
+    except OptimizeError as exc:
+        match = _COLUMN_IN_ERROR.search(str(exc))
+        if not match:
+            return None
+        name = (match.group(1) or match.group(2)).replace('"', "").lower()
+        if "." in name:
+            return None
+        return _alias_typo(name, tree)
+    except sqlglot.errors.SqlglotError:
+        return None
+    return None
+
+
+def _alias_typo(column: str, tree: exp.Expression) -> tuple[str, str, str] | None:
+    """(column, alias, rest) when column is alias_rest and rest is a column of that alias's view."""
+    if "_" not in column:
+        return None
+    aliases = {node.alias_or_name.lower(): node.name.lower() for node in tree.find_all(exp.Table)}
+    prefix, _, rest = column.partition("_")
+    view = aliases.get(prefix)
+    if view and rest in VIEW_COLUMNS.get(view, ()):
+        return column, prefix, rest
+    return None
+
+
 def validate_sql(query: str, max_rows: int = MAX_SQL_ROWS) -> str:
     try:
         statements = sqlglot.parse(query, read="postgres")
@@ -132,7 +275,31 @@ def validate_sql(query: str, max_rows: int = MAX_SQL_ROWS) -> str:
         raise SQLValidationError(f"El LIMIT debe estar entre 1 y {max_rows}.")
     # Last, so every earlier rule keeps its own message (LIMIT ALL is not a column).
     _check_columns(tree, {table.name.lower() for table in tables})
+    _check_values(tree)
     return tree.sql(dialect="postgres")
+
+
+def _check_values(tree: exp.Select) -> None:
+    """Rejects a text compared with a categorical column that never holds it (A5, mejora 16).
+
+    On 2026-11-20 e03 filtered tipo_procedimiento_norm = 'brand_and_push': the
+    company name taken for a procedure type, which returns nothing.
+    """
+    for node in tree.find_all(exp.EQ, exp.NEQ, exp.In):
+        if isinstance(node, exp.In):
+            pairs = [(node.this, item) for item in node.expressions]
+        else:
+            pairs = [(node.this, node.expression), (node.expression, node.this)]
+        for column, value in pairs:
+            if not (isinstance(column, exp.Column) and isinstance(value, exp.Literal) and value.is_string):
+                continue
+            allowed = CATEGORY_VALUES.get(column.name.lower())
+            if allowed and value.this not in allowed:
+                hint = CATEGORY_HINTS.get(column.name.lower(), "")
+                raise SQLValidationError(
+                    f"'{value.this}' no es un valor de {column.name}; sus valores son: "
+                    f"{', '.join(allowed)}.{hint}"
+                )
 
 
 def _check_columns(tree: exp.Select, views_in_query: set[str]) -> None:
@@ -159,17 +326,17 @@ def _check_columns(tree: exp.Select, views_in_query: set[str]) -> None:
 def _column_message(column: str, views_in_query: set[str], qualifier: str = "",
                     tree: exp.Expression | None = None) -> str:
     homes = [view for view, columns in VIEW_COLUMNS.items() if column in columns]
-    if not qualifier and tree is not None and "_" in column:
+    typo = _alias_typo(column, tree) if not qualifier and tree is not None else None
+    if typo:
         # A5, mejora 10: on 2026-11-19 the model wrote c_fuente for c.fuente in q07 and
         # q08 and, told only that c_fuente does not exist, repeated it in the retry.
-        aliases = {node.alias_or_name.lower(): node.name.lower() for node in tree.find_all(exp.Table)}
-        prefix, _, rest = column.partition("_")
-        view = aliases.get(prefix)
-        if view and rest in VIEW_COLUMNS.get(view, ()):
-            return (
-                f"La columna {column} no existe: para la columna {rest} de clean.{view} "
-                f"escribe {prefix}.{rest}, con punto y no con guion bajo."
-            )
+        # parse_response now fixes it first (mejora 15); this message is for other callers.
+        _, prefix, rest = typo
+        view = {node.alias_or_name.lower(): node.name.lower() for node in tree.find_all(exp.Table)}[prefix]
+        return (
+            f"La columna {column} no existe: para la columna {rest} de clean.{view} "
+            f"escribe {prefix}.{rest}, con punto y no con guion bajo."
+        )
     if qualifier and tree is not None:
         # sqlglot names the qualifier only when it matches no table or subquery.
         known = {node.alias_or_name.lower() for node in tree.find_all(exp.Table)}
