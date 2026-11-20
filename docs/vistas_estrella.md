@@ -86,30 +86,38 @@ LIMIT 20
 | # | Decisión | Propuesta mientras no haya respuesta | Quién |
 |---|---|---|---|
 | 1 | ¿La dimensión de proveedor lleva el RFC? Mario lo usa para el cruce con el 69-B | No: dato personal. Mario sigue leyendo `clean.contratos`, o se crea una vista aparte con RFC que no se le dé al Agente Consulta | Backend y Mario |
-| 2 | Fecha de publicación del 69-B: no está en `clean` (`_loaded_at` es la fecha de carga, no la del SAT) | Cargarla en el ETL desde el listado original; mientras tanto, `situacion_69b` sin fecha y con el aviso de no afirmar la situación vigente | Backend |
+| 2 | Fecha de publicación del 69-B: no está en `clean` (`_loaded_at` es la fecha de carga, no la del SAT) | Cargarla en el ETL desde el listado original; mientras tanto, `situacion_69b` sin fecha y con el aviso de no afirmar la situación vigente. V5 lo confirma: 52 RFC tienen dos o tres situaciones (por ejemplo, Definitivo y después Sentencia Favorable) y sin la fecha no se sabe cuál es la vigente | Backend |
 | 3 | Coincidencias solo por nombre: `media` en el código, "baja" en el plan | Conservar la etiqueta del ETL (`media`) y aclarar que es un cruce por nombre | Mario y Backend |
-| 4 | ¿Vistas normales o materializadas? El hecho revisa `coincidencias_69b` por cada contrato y la dimensión de proveedor agrupa 2.4 millones de filas | Medir el tiempo con la consulta V7. Si es lento: índice en `coincidencias_69b(codigo_contrato)` o vistas materializadas que se refresquen después del ETL | Backend |
+| 4 | ¿Vistas normales o materializadas? El hecho revisa `coincidencias_69b` por cada contrato y la dimensión de proveedor agrupa 2.4 millones de filas | Normales por ahora. V7: la dimensión completa tarda 9.0 s, pero la ficha de una empresa tarda 0.1 s (usa el índice `idx_clean_contratos_proveedor`) y el ejemplo de la sección 3, 2.5 s. Materializar solo si alguien necesita recorrer la dimensión completa seguido, por ejemplo una lista de todos los proveedores en el front | Backend |
 | 5 | ¿El Agente Consulta consulta la estrella? | No por ahora: con dos vistas planas el modelo escribe menos uniones, y A4 y A5 se midieron así. Si se decide que sí, hay que actualizar `VIEW_COLUMNS`, el prompt y el golden set, y volver a medir | Equipo |
 | 6 | ¿La invitación a cuando menos tres personas es competitiva? | No (`es_competitivo = false`), provisional | Mario |
 | 7 | ¿Agregar la situación del 69-B también a `v_coincidencias_69b_agente`? | Sí, una columna `situacion_del_contribuyente`, cuando se resuelva la 2. Cambia una vista del agente, así que habría que actualizar `VIEW_COLUMNS` y quitar la entrada de `VIEW_GAPS` en `agents/consulta/concepts.py`, que hoy responde "sin datos" a esa pregunta | Backend y Agente Consulta |
 | 8 | Número del archivo al moverlo a `etl/sql/` | El siguiente libre. `19_` ya lo usa `19_bitacora_calidad.sql` en la rama `mcp` (2026-11-19), así que probablemente `20_` | Backend |
 | 9 | `proveedor_normalizado` conserva "S A DE C V" en 420,137 contratos del histórico (verificado el 2026-11-19): `normalize_provider` quita la puntuación antes que el sufijo, así que "S.A. de C.V." queda como "S A DE C V". La dimensión de proveedor separaría a una misma empresa en dos claves | Corregir el orden en `etl/build_clean.py` (quitar el sufijo con y sin puntos) y recalcular `clean`. El agente de Mario y `agents/consulta/providers.py` copian la regla: hay que cambiarlos a la vez. Mientras tanto, el Agente Consulta busca cada proveedor con y sin esos sufijos (A5, mejora 19, 2026-11-20); eso sigue funcionando después de la corrección | Backend, Mario y Agente Consulta |
+| 10 | 149 contratos de ComprasMX (80 proveedores) traen un RFC de 14 caracteres con la forma `AAA999999AA999` (V6), que no es ni de persona física ni de moral. `tipo_persona` queda nulo para esos 80 | Revisar en la fuente si son un RFC de persona moral con algo agregado o un error de captura. Mientras tanto, se quedan como nulos: es más seguro que adivinar | Backend |
 
 ## 5. Verificación contra la base
 
 Todas son de solo lectura y se pueden correr con `agent_ro`, que puede leer todas
 las tablas de `clean`. Los resultados se anotan aquí antes de crear las vistas.
 
-| # | Qué comprueba | Resultado esperado |
-|---|---|---|
-| V1 | El hecho tiene todos los contratos | 84,676 de ComprasMX y 2,356,609 del histórico |
-| V2 | `clave_institucion` tiene un solo nombre | Cero claves con más de un nombre, o la lista para revisar |
-| V3 | Contratos sin proveedor (quedan fuera de la dimensión) | Pocos, y se reportan |
-| V4 | Valores de la situación del 69-B | Presunto, definitivo, desvirtuado, sentencia favorable u otros por revisar |
-| V5 | RFC del 69-B con más de una situación | Ninguno, o la lista para revisar |
-| V6 | Largo del RFC en ComprasMX | Casi todos 12 o 13 |
-| V7 | Tiempo de la dimensión de proveedor | Unos segundos; si es mucho, decisión 4 |
-| V8 | Códigos de contrato repetidos entre fuentes | Ninguno (si los hay, la coincidencia del 69-B se atribuye a ambas fuentes) |
+| # | Qué comprueba | Resultado esperado | Resultado (2026-11-20) |
+|---|---|---|---|
+| V1 | El hecho tiene todos los contratos | 84,676 de ComprasMX y 2,356,609 del histórico | ✅ Iguales. `v_hecho_contrato` da 2,441,285 filas: 27 contratos de ComprasMX y 790 del histórico con coincidencia en el 69-B |
+| V2 | `clave_institucion` tiene un solo nombre | Cero claves con más de un nombre, o la lista para revisar | ✅ Cero. `v_dim_institucion` tiene 784 claves |
+| V3 | Contratos sin proveedor (quedan fuera de la dimensión) | Pocos, y se reportan | ✅ 75, todos del histórico |
+| V4 | Valores de la situación del 69-B | Presunto, definitivo, desvirtuado, sentencia favorable u otros por revisar | ✅ Solo esos cuatro: Definitivo 12,036, Sentencia Favorable 1,667, Presunto 794 y Desvirtuado 340 registros |
+| V5 | RFC del 69-B con más de una situación | Ninguno, o la lista para revisar | ⚠️ 52 RFC (2 de personas físicas): Definitivo y Sentencia Favorable 37, Presunto y Sentencia Favorable 7, Definitivo y Presunto 5, las tres 3. Solo 3 contratos coinciden con esos RFC. Ver la decisión 2 |
+| V6 | Largo del RFC en ComprasMX | Casi todos 12 o 13 | ⚠️ 12: 60,101; 13: 24,426; **14: 149 contratos** (80 proveedores), todos con la forma `AAA999999AA999`. No hay RFC genéricos ni proveedores con RFC de 12 y de 13 a la vez. Ver la decisión 10 |
+| V7 | Tiempo de la dimensión de proveedor | Unos segundos; si es mucho, decisión 4 | ✅ Completa: 9.0 s para 298,495 proveedores. De una sola empresa: 0.1 s. El ejemplo de la sección 3: 2.5 s. Ver la decisión 4 |
+| V8 | Códigos de contrato repetidos entre fuentes | Ninguno (si los hay, la coincidencia del 69-B se atribuye a ambas fuentes) | ✅ Ninguno |
+
+Además, el `SELECT` de las cinco vistas corrió en la base sin errores: `v_dim_fecha`
+tiene 5,320 fechas, y `v_dim_proveedor` da 32,145 proveedores con `tipo_persona`
+(18,508 físicas y 13,637 morales) y 266,350 sin tipo: los del histórico, que no
+traen RFC, y los 80 de la decisión 10. Con coincidencia en el 69-B hay 8
+proveedores con confianza alta (morales, de ComprasMX) y 374 con confianza media
+(sin RFC); 3 de ellos juntan más de una situación en `situacion_69b`.
 
 ```sql
 -- V1
@@ -149,8 +157,8 @@ GROUP BY codigo_contrato HAVING COUNT(DISTINCT fuente) > 1 LIMIT 20;
 ## 6. Pasos para cerrar T6
 
 1. Backend y Mario revisan este borrador y las decisiones de la sección 4.
-2. Con la EC2 prendida, el Agente Consulta corre V1 a V8 con `agent_ro` y anota
-   los resultados en la sección 5.
+2. ~~Con la EC2 prendida, el Agente Consulta corre V1 a V8 con `agent_ro` y anota
+   los resultados en la sección 5.~~ Hecho el 2026-11-20.
 3. Backend mueve `vistas_estrella.sql` a `etl/sql/` con su número, lo corre en
    la EC2 y comprueba que `scripts/check_comentarios.sql` no devuelve filas:
    esa es la evidencia que pide el plan.
