@@ -3,7 +3,8 @@
 Recorrido fijo (sin LangGraph ni reintentos entre etapas; eso es O1–O8):
 
   1. Consulta    agents.consulta.answer_question: pregunta -> SQL validado -> filas (agent_ro).
-  2. Detección   agente_deteccion.ejecutar sobre los contratos que devolvió la consulta.
+  2. Calidad     revisa los contratos (calidad_evaluada en la bitácora); informativa, no detiene.
+     Detección   agente_deteccion.ejecutar sobre los contratos que devolvió la consulta.
      Normativo   RAG (rag.chunks) con embeddings en la laptop del agente; si falla, el reporte
                  lo declara como limitación en vez de inventar normas.
   3. Reportes    agente_reporte.generar_reporte -> PDF -> almacén (S3 en la EC2).
@@ -128,6 +129,30 @@ def _recuperador(agente_url: str, registrar):
     return recuperar
 
 
+def etapa_calidad(repo, caso_id: str, ids: list[str]) -> dict | None:
+    """Revisa la calidad de los contratos y la deja en la bitácora (calidad_evaluada).
+
+    Es informativa: NO detiene el caso. Si se debe detener por mala calidad, y con qué umbral,
+    es una decisión pendiente del equipo (ver docs/propuestas/calidad-revision-humana.md).
+    """
+    from backend.herramientas.servicio import Herramientas, cargar_contratos_con
+    from eval.run_benchmark import connect_agent_ro, execute_read_only
+
+    herramientas = Herramientas(repo, execute_read_only, cargar_contratos_con(connect_agent_ro),
+                                describir=dict, origen=USUARIO)
+    try:
+        r = herramientas.evaluar_calidad(caso_id, ids)
+    except Exception as exc:  # la revisión de calidad nunca tumba el caso
+        repo.registrar_evento(caso_id, "error", {"tipo": type(exc).__name__,
+                                                 "mensaje": f"Calidad no evaluada: {str(exc)[:200]}"})
+        _paso(f"  calidad no evaluada: {type(exc).__name__}")
+        return None
+    problemas = ", ".join(f"{n} {m}" for m, n in r["problemas_por_motivo"].items()) or "sin problemas"
+    _paso(f"  calidad: {r['contratos_revisados']} contrato(s) revisados; {problemas}; "
+          f"{len(r['contradicciones'])} contradicción(es)")
+    return r
+
+
 def etapa_deteccion(repo, caso_id, filas_consulta, agente_url, avanzar) -> dict:
     from agente_deteccion.agente import ejecutar
     from agente_deteccion.esquema import validar_resultado
@@ -137,6 +162,7 @@ def etapa_deteccion(repo, caso_id, filas_consulta, agente_url, avanzar) -> dict:
     if not ids:
         raise Bloqueo("La consulta no devolvió códigos de contrato, así que no hay contratos que "
                       "analizar. Reformula pidiendo los contratos (p. ej. «lista los contratos…»).")
+    etapa_calidad(repo, caso_id, ids)
     with connect_agent_ro() as conn, conn.cursor() as cur:
         cur.execute(SQL_CONTRATOS, (ids,))
         filas = list(cur.fetchall())

@@ -85,8 +85,10 @@ class Herramientas:
         describir: Callable[[], dict[str, Any]],
         cobertura: Callable[[], Any] | None = None,
         recuperador: Callable[[], Recuperador] | None = None,
+        origen: str = ORIGEN,
     ):
         self.repo = repo
+        self.origen = origen  # quién usó la herramienta: "mcp" o el orquestador que la llama directo
         self._ejecutar_sql = ejecutar_sql
         self._cargar = cargar_contratos
         self._describir = describir
@@ -107,7 +109,7 @@ class Herramientas:
         return caso
 
     def _registrar(self, caso_id: str, evento: str, detalle: dict) -> None:
-        self.repo.registrar_evento(caso_id, evento, {**_json(detalle), "origen": ORIGEN})
+        self.repo.registrar_evento(caso_id, evento, {**_json(detalle), "origen": self.origen})
 
     # ------------------------------------------------------------------ herramientas
     def describir_datos(self) -> dict[str, Any]:

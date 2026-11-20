@@ -45,7 +45,7 @@ def _recuperador(engine):
     return crear
 
 
-def herramientas_desde_entorno() -> Herramientas:
+def herramientas_desde_entorno(origen: str = "mcp") -> Herramientas:
     from eval.run_benchmark import connect_agent_ro, execute_read_only
     engine = engine_desde_entorno()
     return Herramientas(
@@ -55,6 +55,7 @@ def herramientas_desde_entorno() -> Herramientas:
         describir=_describir,
         cobertura=_cobertura,
         recuperador=_recuperador(engine),
+        origen=origen,
     )
 
 
