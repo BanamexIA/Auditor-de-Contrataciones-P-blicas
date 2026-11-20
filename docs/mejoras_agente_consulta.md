@@ -92,3 +92,33 @@ Mediciones con la base encendida:
 .venv\Scripts\python -m eval.run_consulta --casos eval/casos_consulta.yaml
 .venv\Scripts\python -m eval.run_consulta --casos eval/casos_empresa.yaml
 ```
+
+**2026-11-19 — Primera medición de A5.** Análisis en cada carpeta:
+
+| Medición | A4 | A5 | Análisis |
+|---|---|---|---|
+| Golden set, 3 repeticiones | 79.2 % | **75.0 %** | [consulta_20261119_175018](../eval/results/consulta_20261119_175018/analisis.md) |
+| Casos de A2 | 8 de 13 | **10 de 13** | [consulta_casos_consulta_20261119_175207](../eval/results/consulta_casos_consulta_20261119_175207/analisis.md) |
+| Casos de empresa | — | **SQL 1 de 5** | [consulta_casos_empresa_20261119_175313](../eval/results/consulta_casos_empresa_20261119_175313/analisis.md) |
+
+Se arreglaron q06, q16, c10 y c13. Fallaron q07 y q08 (`c_fuente` por
+`c.fuente`), q15 (eligió `fecha_inicio_valida`) y q18 (`LIMIT 20` sobre 44
+filas). Los casos de empresa mostraron que el agente buscaba la empresa en
+`nombre_de_la_uc`, la unidad compradora.
+
+## Segunda ronda (2026-11-19)
+
+| # | Mejora | Corrige | Dónde |
+|---|---|---|---|
+| 10 | Si el modelo escribe `alias_columna` (por ejemplo `c_fuente`), el validador responde "escribe `c.fuente`, con punto" | q07, q08 | `validator.py` |
+| 11 | `LIMIT 200` salvo que la pregunta pida un número de filas: es un tope, no un recorte | q18 | `prompt.py` |
+| 12 | Proveedores: regla y ejemplo resuelto (empresa ficticia) para buscar por `proveedor_normalizado`, y `providers.py` pasa el nombre que escriba el modelo a la forma del ETL (mayúsculas, sin acentos ni "SA DE CV"), con un supuesto que lo dice | e01 a e05 | `prompt.py`, `providers.py` |
+| 13 | La regla de booleanos aclara que `fecha_inicio_estado` es el estado y `fecha_inicio_valida` solo sí o no | q15 | `prompt.py` |
+
+**Prueba rápida con la base (sin repetir):** q07, q08, q15 y q18 aciertan (q08
+con la pista de la mejora 10 en el reintento). En los casos de empresa aciertan
+e01, e02 y e04; e03 confundió el nombre con un tipo de procedimiento y e05
+siguió buscando en `nombre_de_la_uc`. Falta la medición completa.
+
+**Los casos de empresa ya no son preguntas nuevas:** la mejora 12 se ajustó con
+ellos. Para medir si el agente generaliza hacen falta casos de empresa nuevos.

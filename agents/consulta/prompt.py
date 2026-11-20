@@ -5,6 +5,7 @@ import re
 from typing import Any, Sequence
 
 from agents.consulta.concepts import MISSING_CONCEPTS
+from agents.consulta.providers import normalize_provider_literals
 from agents.consulta.validator import MAX_SQL_ROWS, add_missing_limit, validate_sql
 
 
@@ -12,6 +13,19 @@ RESPONSE_TYPES = ("sql", "aclaracion", "sin_datos")
 LIMIT_ADDED_NOTE = (
     f"La consulta no traía LIMIT; el sistema agregó LIMIT {MAX_SQL_ROWS}, el máximo permitido."
 )
+
+
+PROVIDER_NOTE_PREFIX = "El proveedor se buscó como "
+
+
+def provider_note(name: str) -> str:
+    """A5, mejora 12: says how the provider name was searched."""
+    return f"{PROVIDER_NOTE_PREFIX}'{name}' en proveedor_normalizado, la forma normalizada del ETL."
+
+
+def is_system_note(text: str) -> bool:
+    """Notes written by code, which the coverage filter must keep even if a name contains "completo"."""
+    return text == LIMIT_ADDED_NOTE or text.startswith(PROVIDER_NOTE_PREFIX)
 
 # Rules distilled from docs/capa_semantica.md; keep both in sync.
 DATA_RULES = """Reglas de los datos:
@@ -35,7 +49,8 @@ BOOLEAN_COLUMNS = (
 # the quick check with the model on 2026-11-19 (booleans compared with 'S' or 'si').
 SQL_RULES = f"""- Nunca uses SELECT * ni alias.*: escribe cada columna que devuelves.
 - Si piden una lista de contratos («lista contratos…», «muestra contratos…», «¿qué contratos…?»), devuelve una fila por contrato con codigo_contrato, fuente y las columnas de cada dato que la pregunta menciona: si habla de fechas o importes, devuelve esas columnas. En una lista no uses GROUP BY ni funciones de agregación.
-- {", ".join(BOOLEAN_COLUMNS)} son verdadero o falso: úsalas solas en WHERE (por ejemplo WHERE m.rfc_exacto) o con NOT, nunca comparadas con texto como 'S' o 'si'.
+- {", ".join(BOOLEAN_COLUMNS)} son verdadero o falso: úsalas solas en WHERE (por ejemplo WHERE m.rfc_exacto) o con NOT, nunca comparadas con texto como 'S' o 'si'. fecha_inicio_estado es otra cosa: el estado de la fecha (valida, nula, fuera_de_rango o no_parseable); si preguntan por el estado de la fecha de inicio, usa esa columna.
+- Para buscar un proveedor (la empresa o persona que vende), filtra clean.v_contratos_agente con proveedor_normalizado = '<nombre como lo dice la pregunta>'; el sistema lo pasa a la forma normalizada. nombre_de_la_uc es la unidad compradora, quien compra, no el proveedor. No unas la vista del 69-B ni agregues filtros que la pregunta no pide.
 - Pon en WHERE todas las condiciones de la pregunta: fuente, periodo, tipo de procedimiento, institución, coincidencia con el 69-B. Si nombra un tipo de procedimiento, filtra tipo_procedimiento_norm con su valor.
 - "Preliminar" describe toda la clasificación de tipo_procedimiento_norm, no es un filtro: no filtres por tipo_procedimiento_estado salvo que la pregunta pida un estado de validación.
 - rfc_exacto, nivel_confianza, requiere_revision_humana, rfc y nombre_del_contribuyente solo están en clean.v_coincidencias_69b_agente. Si la pregunta habla del 69-B y necesitas esas columnas junto con datos del contrato, une las vistas: FROM clean.v_contratos_agente AS c JOIN clean.v_coincidencias_69b_agente AS m ON m.codigo_contrato = c.codigo_contrato. Si no habla del 69-B, no las unas."""
@@ -61,6 +76,20 @@ BUILT_IN_EXAMPLES = (
         "respuesta": {
             "tipo": "sin_datos",
             "motivo": "Las fuentes no registran fechas de pago, y el importe no es gasto pagado.",
+        },
+    },
+    {
+        # A5, mejora 12: a fictitious company; on 2026-11-19 the model searched companies in nombre_de_la_uc.
+        "pregunta": "¿Cuántos contratos de licitación pública ganó la empresa Constructora Ejemplo del Valle en ComprasMX?",
+        "respuesta": {
+            "tipo": "sql",
+            "sql": (
+                "SELECT COUNT(*) AS contratos FROM clean.v_contratos_agente WHERE fuente = 'comprasmx' "
+                "AND tipo_procedimiento_norm = 'licitacion_publica' "
+                "AND proveedor_normalizado = 'CONSTRUCTORA EJEMPLO DEL VALLE' LIMIT 1"
+            ),
+            "filtros": ["fuente: ComprasMX", "procedimiento: licitación pública", "proveedor: Constructora Ejemplo del Valle"],
+            "supuestos": [],
         },
     },
     {
@@ -116,7 +145,7 @@ En supuestos anota solo cómo interpretaste la pregunta, por ejemplo qué métri
 
 Reglas del SQL:
 - Una sola sentencia SELECT. Solo puedes leer clean.v_contratos_agente y clean.v_coincidencias_69b_agente, siempre con el esquema clean.
-- Incluye LIMIT con un entero entre 1 y {MAX_SQL_ROWS}.
+- Incluye LIMIT con un entero entre 1 y {MAX_SQL_ROWS}. Usa LIMIT {MAX_SQL_ROWS} salvo que la pregunta pida un número de filas (por ejemplo «los 10 más…» o «hasta 20»): el LIMIT es un tope de seguridad, no un recorte del resultado.
 - No uses WITH, UNION, RANK, DENSE_RANK, NTILE ni unaccent. Si necesitas pasos intermedios, usa subconsultas.
 - Usa solo las columnas de la lista de abajo.
 {SQL_RULES}
@@ -192,9 +221,11 @@ def parse_response(text: str) -> dict[str, Any]:
         )
     if response_type == "sql":
         sql, limit_added = add_missing_limit(_required_text(payload, "sql"))
+        sql, providers = normalize_provider_literals(sql)
         supuestos = _text_list(payload, "supuestos")
         if limit_added:
             supuestos.append(LIMIT_ADDED_NOTE)
+        supuestos.extend(provider_note(name) for name in dict.fromkeys(providers))
         return {
             "tipo": "sql",
             "sql": validate_sql(sql),

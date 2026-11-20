@@ -7,7 +7,13 @@ from psycopg import DataError, ProgrammingError
 
 from agents.consulta.concepts import missing_concept, missing_concept_reason, plain_text
 from agents.consulta.coverage import Coverage, check_coverage
-from agents.consulta.prompt import ResponseFormatError, build_user_prompt, parse_response, proposed_sql
+from agents.consulta.prompt import (
+    ResponseFormatError,
+    build_user_prompt,
+    is_system_note,
+    parse_response,
+    proposed_sql,
+)
 from agents.consulta.validator import SQLValidationError
 from llm.base import LLMClient
 
@@ -136,6 +142,8 @@ def _apply_coverage(result: dict[str, Any], coverage: Coverage) -> dict[str, Any
         }
     # Only the coverage check speaks about coverage: on 2026-11-17 the model wrote
     # "2024 está completo" next to the check's correct warning that it is not.
-    supuestos = [item for item in result["supuestos"] if not talks_about_coverage(item)]
+    supuestos = [
+        item for item in result["supuestos"] if is_system_note(item) or not talks_about_coverage(item)
+    ]
     supuestos.extend(item for item in check.supuestos if item not in supuestos)
     return {**result, "supuestos": supuestos}

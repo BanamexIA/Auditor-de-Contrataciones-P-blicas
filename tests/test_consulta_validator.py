@@ -183,6 +183,19 @@ class ColumnTests(unittest.TestCase):
             f"solo está en {COINCIDENCIAS}", "alias",
         )
 
+    def test_alias_written_with_an_underscore_gets_the_fix(self):
+        # A5, mejora 10: q07 and q08 on 2026-11-19 wrote c_fuente for c.fuente.
+        self.assert_rejected(
+            f"SELECT c_fuente, COUNT(DISTINCT c.codigo_contrato) AS contratos FROM {CONTRATOS} AS c "
+            f"JOIN {COINCIDENCIAS} AS m ON m.codigo_contrato = c.codigo_contrato "
+            f"WHERE m.rfc_exacto GROUP BY c_fuente LIMIT 20",
+            "escribe c.fuente", "con punto",
+        )
+
+    def test_underscore_without_a_matching_alias_keeps_the_usual_message(self):
+        self.assert_rejected(f"SELECT x_fuente FROM {CONTRATOS} AS c LIMIT 5", "no existe en las vistas aprobadas")
+        self.assert_rejected(f"SELECT c_monto FROM {CONTRATOS} AS c LIMIT 5", "no existe en las vistas aprobadas")
+
     def test_an_alias_that_does_not_exist_is_named_as_the_problem(self):
         # q06 on 2026-11-19: alias t was never defined; the column itself exists.
         self.assert_rejected(

@@ -159,6 +159,17 @@ def _check_columns(tree: exp.Select, views_in_query: set[str]) -> None:
 def _column_message(column: str, views_in_query: set[str], qualifier: str = "",
                     tree: exp.Expression | None = None) -> str:
     homes = [view for view, columns in VIEW_COLUMNS.items() if column in columns]
+    if not qualifier and tree is not None and "_" in column:
+        # A5, mejora 10: on 2026-11-19 the model wrote c_fuente for c.fuente in q07 and
+        # q08 and, told only that c_fuente does not exist, repeated it in the retry.
+        aliases = {node.alias_or_name.lower(): node.name.lower() for node in tree.find_all(exp.Table)}
+        prefix, _, rest = column.partition("_")
+        view = aliases.get(prefix)
+        if view and rest in VIEW_COLUMNS.get(view, ()):
+            return (
+                f"La columna {column} no existe: para la columna {rest} de clean.{view} "
+                f"escribe {prefix}.{rest}, con punto y no con guion bajo."
+            )
     if qualifier and tree is not None:
         # sqlglot names the qualifier only when it matches no table or subquery.
         known = {node.alias_or_name.lower() for node in tree.find_all(exp.Table)}

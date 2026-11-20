@@ -5,7 +5,7 @@ from psycopg import errors as pg_errors
 
 from agents.consulta.agent import MAX_ATTEMPTS, answer_question, talks_about_coverage
 from agents.consulta.coverage import Coverage
-from agents.consulta.prompt import LIMIT_ADDED_NOTE
+from agents.consulta.prompt import LIMIT_ADDED_NOTE, provider_note
 from llm.base import LLMClient, LLMResponse
 
 
@@ -215,6 +215,14 @@ class CoverageNotesTests(unittest.TestCase):
         ):
             with self.subTest(supuesto=note):
                 self.assertFalse(talks_about_coverage(note))
+
+    def test_system_notes_survive_even_if_a_name_sounds_like_coverage(self):
+        sql = (
+            "SELECT COUNT(*) AS contratos FROM clean.v_contratos_agente "
+            "WHERE fuente = 'comprasmx' AND proveedor_normalizado = 'Servicios Completos' LIMIT 1"
+        )
+        result = ask(FakeClient(sql_answer(sql)))
+        self.assertIn(provider_note("SERVICIOS COMPLETOS"), result["supuestos"])
 
     def test_a_false_model_note_is_replaced_by_the_coverage_check(self):
         # q04 on 2026-11-17: the model said 2024 was complete next to the correct warning.

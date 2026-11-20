@@ -13,6 +13,7 @@ from agents.consulta.prompt import (
     build_system_prompt,
     build_user_prompt,
     parse_response,
+    provider_note,
 )
 from agents.consulta.validator import MAX_SQL_ROWS, VIEW_COLUMNS, SQLValidationError, validate_sql
 
@@ -49,6 +50,17 @@ class SystemPromptTests(unittest.TestCase):
             "todas las condiciones de la pregunta",
             "no filtres por tipo_procedimiento_estado",
             "JOIN clean.v_coincidencias_69b_agente AS m ON m.codigo_contrato = c.codigo_contrato",
+        ):
+            with self.subTest(regla=fragment):
+                self.assertIn(fragment, self.prompt)
+
+    def test_includes_the_second_round_rules(self):
+        # A5, mejoras 11 to 13: q18 (LIMIT as a cut), e01-e05 (provider search), q15 (estado vs valida).
+        for fragment in (
+            "el LIMIT es un tope de seguridad, no un recorte",
+            "filtra clean.v_contratos_agente con proveedor_normalizado",
+            "nombre_de_la_uc es la unidad compradora",
+            "si preguntan por el estado de la fecha de inicio, usa esa columna",
         ):
             with self.subTest(regla=fragment):
                 self.assertIn(fragment, self.prompt)
@@ -142,6 +154,15 @@ class ParseResponseTests(unittest.TestCase):
         }))
         self.assertTrue(response["sql"].endswith(f"LIMIT {MAX_SQL_ROWS}"))
         self.assertEqual(response["supuestos"], ["Supuesto del modelo.", LIMIT_ADDED_NOTE])
+
+    def test_provider_name_is_normalized_with_a_note(self):
+        response = parse_response(json.dumps({
+            "tipo": "sql",
+            "sql": "SELECT COUNT(*) AS contratos FROM clean.v_contratos_agente "
+                   "WHERE fuente = 'comprasmx' AND proveedor_normalizado = 'Molinera de México' LIMIT 1",
+        }))
+        self.assertIn("proveedor_normalizado = 'MOLINERA DE MEXICO'", response["sql"])
+        self.assertEqual(response["supuestos"], [provider_note("MOLINERA DE MEXICO")])
 
     def test_sql_with_its_own_limit_gets_no_note(self):
         response = parse_response(json.dumps({"tipo": "sql", "sql": VALID_SQL}))
