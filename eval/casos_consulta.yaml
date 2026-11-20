@@ -1,0 +1,107 @@
+# Casos de A2: aclaración ante preguntas ambiguas y "sin datos".
+# tipo_esperado es la respuesta correcta del Agente Consulta.
+# sql_ingenuo es el SQL que un modelo podría escribir si no detecta el problema;
+# la revisión de cobertura debe convertirlo en "sin_datos" sin ayuda del modelo.
+# sql_esperado es la respuesta correcta de los casos que sí esperan SQL.
+- id: c01
+  pregunta: ¿Cuál es la institución que más contrata?
+  tipo_esperado: aclaracion
+  notas: No dice si se mide por número de contratos o por importe registrado.
+- id: c02
+  pregunta: Dame los contratos sospechosos.
+  tipo_esperado: aclaracion
+  notas: No define qué señal revisar; el agente no califica contratos como sospechosos.
+- id: c03
+  pregunta: ¿Cuánto se gastó en adjudicaciones directas?
+  tipo_esperado: aclaracion
+  notas: El importe registrado no es gasto pagado; faltan fuente, periodo y moneda.
+- id: c04
+  pregunta: ¿Qué proveedores aparecen mucho?
+  tipo_esperado: aclaracion
+  notas: '"Mucho" no tiene criterio: número de contratos, importe o periodo.'
+- id: c05
+  pregunta: ¿Cómo le fue a la Secretaría de Salud?
+  tipo_esperado: aclaracion
+  notas: No indica qué métrica revisar.
+- id: c06
+  pregunta: ¿Cuántos contratos de licitación pública iniciaron en 2025?
+  tipo_esperado: sin_datos
+  notas: No hay contratos con inicio en 2025 en ninguna fuente.
+  sql_ingenuo: |
+    SELECT COUNT(*) AS contratos
+    FROM clean.v_contratos_agente
+    WHERE tipo_procedimiento_norm = 'licitacion_publica'
+      AND fecha_inicio >= DATE '2025-01-01'
+      AND fecha_inicio < DATE '2026-01-01'
+    LIMIT 1
+- id: c07
+  pregunta: ¿Qué unidades compradoras tuvieron más contratos en 2016?
+  tipo_esperado: sin_datos
+  notas: 2016 solo está en el histórico, que no trae unidad compradora.
+  sql_ingenuo: |
+    SELECT nombre_de_la_uc, COUNT(*) AS contratos
+    FROM clean.v_contratos_agente
+    WHERE EXTRACT(YEAR FROM fecha_inicio)::integer = 2016
+    GROUP BY nombre_de_la_uc
+    ORDER BY contratos DESC, nombre_de_la_uc
+    LIMIT 10
+- id: c08
+  pregunta: ¿Cuántos contratos del histórico iniciaron en 2026?
+  tipo_esperado: sin_datos
+  notas: El histórico termina en 2024.
+  sql_ingenuo: |
+    SELECT COUNT(*) AS contratos
+    FROM clean.v_contratos_agente
+    WHERE fuente = 'historico'
+      AND fecha_inicio BETWEEN '2026-01-01' AND '2026-12-31'
+    LIMIT 1
+- id: c09
+  pregunta: ¿Cuántos contratos de ComprasMX iniciaron en 2020?
+  tipo_esperado: sin_datos
+  notas: ComprasMX solo tiene contratos con inicio en 2026.
+  sql_ingenuo: |
+    SELECT COUNT(*) AS contratos
+    FROM clean.v_contratos_agente
+    WHERE fuente = 'comprasmx'
+      AND fecha_inicio >= DATE '2020-01-01'
+      AND fecha_inicio < DATE '2021-01-01'
+    LIMIT 1
+- id: c10
+  pregunta: ¿Qué contratos se cancelaron antes de terminar?
+  tipo_esperado: sin_datos
+  notas: Las fuentes no registran cancelaciones.
+- id: c11
+  pregunta: ¿Cuántos contratos hubo por ramo en 2019?
+  tipo_esperado: sin_datos
+  notas: El ramo solo existe en ComprasMX, que no tiene 2019.
+  sql_ingenuo: |
+    SELECT descripcion_ramo, COUNT(*) AS contratos
+    FROM clean.v_contratos_agente
+    WHERE fecha_inicio >= DATE '2019-01-01'
+      AND fecha_inicio < DATE '2020-01-01'
+    GROUP BY descripcion_ramo
+    ORDER BY contratos DESC, descripcion_ramo
+    LIMIT 50
+- id: c12
+  pregunta: ¿Cuántos contratos del histórico iniciaron en 2024?
+  tipo_esperado: sql
+  notas: Hay datos, pero 2024 está incompleto; debe anotarse en supuestos.
+  sql_esperado: |
+    SELECT COUNT(*) AS contratos
+    FROM clean.v_contratos_agente
+    WHERE fuente = 'historico'
+      AND fecha_inicio >= DATE '2024-01-01'
+      AND fecha_inicio < DATE '2025-01-01'
+    LIMIT 1
+- id: c13
+  pregunta: ¿Cuántas licitaciones públicas registró ComprasMX en 2026?
+  tipo_esperado: sql
+  notas: Pregunta clara, con datos.
+  sql_esperado: |
+    SELECT COUNT(*) AS licitaciones
+    FROM clean.v_contratos_agente
+    WHERE fuente = 'comprasmx'
+      AND tipo_procedimiento_norm = 'licitacion_publica'
+      AND fecha_inicio >= DATE '2026-01-01'
+      AND fecha_inicio < DATE '2027-01-01'
+    LIMIT 1

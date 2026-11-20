@@ -7,12 +7,12 @@ contrato hasta que el equipo lo cambie aquí.
 |---|---|---|---|
 | 1 | Señal de riesgo | — | Pendiente |
 | 2 | Estado del caso | [estado_caso.md](estado_caso.md) | Aprobado por Backend (11 nov) |
-| 3 | Tools de los agentes | — | Pendiente |
+| 3 | Tools de los agentes | [tools_consulta.md](tools_consulta.md) (Agente Consulta) | Agente Consulta: Borrador (16 nov); los demás agentes: Pendiente |
 | 4 | Fragmento y cita normativa | — | Pendiente |
 | 5 | Evento de bitácora | [evento_bitacora.md](evento_bitacora.md) | Aprobado por Backend (14 nov) |
 | 6 | API del backend | [api_casos.md](api_casos.md) (casos y estados), [decisiones.md](decisiones.md) (señales y decisiones, HU-07), [reportes.md](reportes.md) (almacenamiento local y S3, B5 y B8), [agentes.md](agentes.md) (registro de agentes, B7) | Aprobado por Backend (11 nov) |
 | 6b | Autenticación | [autenticacion.md](autenticacion.md) (login, token, roles, enlace de reportes) | Aprobado por Backend (19 nov) |
-| 7 | Vistas | — | Pendiente (depende de T5 y T6) |
+| 7 | Vistas | [vistas_estrella.md](../vistas_estrella.md) (T6) | Borrador del Agente Consulta (19 nov); falta que Backend lo apruebe y lo corra en la EC2 |
 
 Un contrato pasa de **Borrador** a **Congelado** cuando lo aprueban los frentes
 que lo usan. Después, cualquier cambio se anota al final del archivo con fecha.

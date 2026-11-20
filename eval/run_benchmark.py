@@ -19,11 +19,18 @@ from pathlib import Path
 from typing import Any
 
 import psycopg
-import sqlglot
 import yaml
 from psycopg.rows import dict_row, tuple_row
-from sqlglot import exp
 
+from agents.consulta.validator import (
+    ALLOWED_TABLES,
+    MAX_SQL_ROWS,
+    QUERY_TIMEOUT_MS,
+    SQLValidationError,
+    extract_sql,
+    is_single_select,
+    validate_sql,
+)
 from etl.db_config import database_settings
 from llm.base import LLMClient, LLMResponse, get_json, post_json, setting
 from llm.cloud_client import CloudClient
@@ -42,19 +49,9 @@ GOLDEN_SET_PATH = ROOT / "eval" / "golden_set.yaml"
 EXAMPLES_PATH = ROOT / "eval" / "examples.yaml"
 RETRIEVAL_QUERIES_PATH = ROOT / "rag" / "test_queries.json"
 RESULTS_PATH = ROOT / "eval" / "results"
-ALLOWED_TABLES = {
-    "v_contratos_agente",
-    "v_coincidencias_69b_agente",
-}
-MAX_SQL_ROWS = 200
-QUERY_TIMEOUT_MS = 60_000
 REPETITIONS = 3
 CONCURRENCY_LEVELS = (1, 2, 4, 8)
 RETRIEVAL_TOP_K = 3
-
-
-class SQLValidationError(ValueError):
-    pass
 
 
 def load_yaml_list(path: Path) -> list[dict[str, Any]]:
@@ -97,56 +94,6 @@ def load_examples(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
             raise ValueError("Los ejemplos del prompt deben ser distintos del golden set.")
         validate_sql(example["sql"])
     return examples
-
-
-def extract_sql(response: str) -> str:
-    fences = re.findall(r"```(?:sql)?\s*(.*?)```", response, flags=re.IGNORECASE | re.DOTALL)
-    if len(fences) > 1:
-        raise SQLValidationError("La respuesta contiene más de un bloque de código.")
-    candidate = fences[0] if fences else response
-    candidate = candidate.strip()
-    if candidate[:4].upper() == "SQL ":
-        candidate = candidate[4:].lstrip()
-    return candidate
-
-
-def validate_sql(query: str, max_rows: int = MAX_SQL_ROWS) -> str:
-    try:
-        statements = sqlglot.parse(query, read="postgres")
-    except sqlglot.errors.ParseError as exc:
-        raise SQLValidationError(f"SQL no válido: {exc}") from exc
-    if len(statements) != 1 or statements[0] is None:
-        raise SQLValidationError("Se permite exactamente una sentencia SQL.")
-    tree = statements[0]
-    if not isinstance(tree, exp.Select):
-        raise SQLValidationError("Solo se permiten consultas SELECT.")
-    if tree.find(exp.Into) or tree.find(exp.Lock):
-        raise SQLValidationError("No se permiten INTO ni bloqueos de filas.")
-    for table in tree.find_all(exp.Table):
-        if table.db.lower() != "clean" or table.name.lower() not in ALLOWED_TABLES:
-            raise SQLValidationError(
-                f"Tabla no permitida: {table.sql(dialect='postgres')}."
-            )
-    for function in tree.find_all(exp.Anonymous):
-        raise SQLValidationError(f"No se permiten funciones SQL no reconocidas: {function.name}.")
-    limit = tree.args.get("limit")
-    if limit is None or not isinstance(limit.expression, exp.Literal):
-        raise SQLValidationError("La consulta debe incluir un LIMIT entero explícito.")
-    try:
-        row_limit = int(limit.expression.this)
-    except (TypeError, ValueError) as exc:
-        raise SQLValidationError("El LIMIT debe ser un entero literal.") from exc
-    if not 1 <= row_limit <= max_rows:
-        raise SQLValidationError(f"El LIMIT debe estar entre 1 y {max_rows}.")
-    return tree.sql(dialect="postgres")
-
-
-def is_single_select(query: str) -> bool:
-    try:
-        statements = sqlglot.parse(query, read="postgres")
-    except sqlglot.errors.ParseError:
-        return False
-    return len(statements) == 1 and isinstance(statements[0], exp.Select)
 
 
 def connect_agent_ro(*, dict_rows: bool = True):
