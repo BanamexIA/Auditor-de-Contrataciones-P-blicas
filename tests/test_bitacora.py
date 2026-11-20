@@ -54,7 +54,12 @@ class ValidarEventoTest(unittest.TestCase):
                                      "contexto": [{"password": "secreto"}]})
 
     def test_todos_los_tipos_tienen_campos(self):
-        self.assertEqual(len(b.TIPOS_EVENTO), 11)
+        """Los tipos del código son los mismos que acepta la restricción de la base (migración 19)."""
+        import re
+        from pathlib import Path
+        sql = (Path(__file__).resolve().parents[1] / "etl/sql/19_bitacora_calidad.sql").read_text(encoding="utf-8")
+        en_base = set(re.findall(r"'([a-z_]+)'", sql.split("CHECK (evento IN (", 1)[1].split("))", 1)[0]))
+        self.assertEqual(set(b.TIPOS_EVENTO), en_base)
 
 
 class LlamarLLMTest(unittest.TestCase):

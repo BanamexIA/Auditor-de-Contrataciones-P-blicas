@@ -30,6 +30,7 @@ from backend.agentes.repositorio import RepositorioAgentesSQL
 from backend.agentes.servicio import AgenteNoDisponible, seleccionar_agente
 from backend.app import engine_desde_entorno
 from backend.casos.repositorio import RepositorioCasosSQL
+from backend.herramientas.servicio import SQL_COINCIDENCIAS, SQL_CONTRATOS
 from backend.demo.adaptadores import (
     ClienteConBitacora,
     entrada_reporte,
@@ -43,17 +44,6 @@ from llm.ollama_client import OllamaClient
 
 USUARIO = "orquestador-demo"
 MAX_CONTRATOS = 500
-
-SQL_CONTRATOS = """
-SELECT codigo_contrato AS id, proveedor, rfc, importe AS monto, moneda, institucion AS dependencia,
-       tipo_procedimiento, tipo_procedimiento_norm, fecha_inicio AS fecha, fecha_fin, fuente,
-       fecha_inicio_estado, fecha_inicio_valida
-FROM clean.contratos WHERE codigo_contrato = ANY(%s)"""
-SQL_COINCIDENCIAS = """
-SELECT codigo_contrato, rfc_exacto, nombre_normalizado_exacto, nivel_confianza, rfc,
-       nombre_del_contribuyente
-FROM clean.v_coincidencias_69b_agente WHERE codigo_contrato = ANY(%s)"""
-
 
 class Bloqueo(Exception):
     """Motivo legible para bloquear el caso (lo verá el auditor)."""

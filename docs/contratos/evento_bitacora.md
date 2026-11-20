@@ -36,6 +36,7 @@ tokens y en cuánto tiempo. Con ella se reconstruye el rastro del caso (HU-06).
 | `sql_generado` | El modelo propone un SQL | Agente Consulta | `sql` |
 | `sql_rechazado` | El validador rechaza el SQL | Agente Consulta | `sql`, `motivo` |
 | `sql_ejecutado` | El SQL corrió con `agent_ro` | Agente Consulta | `sql`, `vistas`, `filas`, `duracion_ms`, `truncado` (si se alcanzó el límite de filas) |
+| `calidad_evaluada` | Se revisa la calidad de los contratos del caso (`19_bitacora_calidad.sql`) | Agente de Calidad / MCP `evaluar_calidad` | `contratos` (revisados), `problemas` (conteo por motivo), `contradicciones`, `no_encontrados` |
 | `reglas_evaluadas` | Termina la Tool 1 | Agente Detección | `reglas`: lista de `{id, version, resultado, valor, umbral}`; `senales`: ids de las señales generadas |
 | `normas_recuperadas` | Termina la Tool 2 | Agente Normativo | `normas`: lista de `{documento, articulo, version, fecha_vigencia, score}` por señal; `sin_soporte`: señales sin norma |
 | `reporte_guardado` | Se guarda el reporte | Agente Reportes | `ruta`, `sha256`, `version` |
