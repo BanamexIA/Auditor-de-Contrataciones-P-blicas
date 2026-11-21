@@ -105,8 +105,12 @@ def etapa_consulta(repo, caso, cliente_base) -> list[dict]:
 
 
 # --------------------------------------------------------------------- 2. Detección + Normativo
-def _recuperador(agente_url: str, registrar):
+def _recuperador(agente_url: str | None, registrar):
     """RAG con embeddings en la laptop del agente. Devuelve None si no se puede preparar."""
+    if not agente_url and not os.environ.get("OLLAMA_EMBED_BASE_URL"):
+        registrar("error", {"tipo": "AgenteNoDisponible",
+                            "mensaje": "RAG omitido: no hay laptop para calcular embeddings."})
+        return None
     try:
         from agente_deteccion.normativo import RecuperadorPgvector
         from eval.run_benchmark import connect_agent_ro
@@ -203,21 +207,28 @@ def etapa_deteccion(repo, caso_id, filas_consulta, agente_url, avanzar) -> dict:
 
 # --------------------------------------------------------------------- 3. Reportes
 def etapa_reportes(repo, caso_id, deteccion, cliente_base, agente) -> dict:
+    """Genera y guarda el PDF. Sin ``cliente_base`` las narrativas son el texto determinista
+    de respaldo del Agente Reportes (segundos en vez de minutos); señales, normas y cifras
+    siguen siendo las reales."""
     from agente_reporte.agente import exportar, generar_reporte
     from agente_reporte.redactor import Redactor
 
-    cliente = ClienteConBitacora(cliente_base, repo.registrar_evento, caso_id, "reportes")
-    redactor = Redactor(llm_fn_redactor(cliente), cliente.model)
+    if cliente_base is None:
+        cliente, redactor = None, Redactor()
+    else:
+        cliente = ClienteConBitacora(cliente_base, repo.registrar_evento, caso_id, "reportes")
+        redactor = Redactor(llm_fn_redactor(cliente), cliente.model)
     reporte = generar_reporte(entrada_reporte(deteccion), redactor)
     v = reporte.verificacion
-    _paso(f"  {len(cliente.llamadas)} llamada(s) al modelo; citas correctas "
+    _paso(f"  {len(cliente.llamadas) if cliente else 0} llamada(s) al modelo; citas correctas "
           f"{v.citas_correctas}/{v.total_citas}; verificación "
           f"{'APROBADA' if v.aprobado else 'NO aprobada (queda como limitación)'}")
     with tempfile.TemporaryDirectory() as tmp:
         rutas = exportar(reporte, tmp, ("pdf",))
         pdf = rutas["pdf"].read_bytes()
     return guardar_reporte(repo, almacen_desde_entorno(), caso_id, pdf, "pdf",
-                           modelo=cliente.model, equipo=agente["nombre_tailnet"])
+                           modelo=redactor.modelo,
+                           equipo=agente["nombre_tailnet"] if cliente and agente else None)
 
 
 # --------------------------------------------------------------------- guion

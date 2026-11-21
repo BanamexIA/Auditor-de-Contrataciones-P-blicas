@@ -27,8 +27,10 @@ cada endpoint están en [`docs/contratos/`](contratos/README.md).
 | `GET` | [`/casos/<id>/reportes`](#get-casosidreportes) | Versiones del reporte | Front |
 | `GET` | [`/casos/<id>/reportes/<version>/enlace`](#get-casosidreportesversionenlace) | URL temporal del reporte para un `<iframe>` | Front |
 | `GET` | [`/casos/<id>/reportes/<version>/archivo`](#get-casosidreportesversionarchivo) | Descargar un reporte | Front |
+| `GET` | [`/casos/<id>/reportes/<version>/contenido`](#get-casosidreportesversioncontenido) | Bytes del reporte vía backend (visor PDF) | Front |
 | `GET` | [`/casos/<id>/telemetria`](#get-casosidtelemetria) | Tokens y latencia del modelo en el caso (B9) | Front, evaluación |
 | `POST` | [`/demo/preguntar`](#post-demopreguntar) | Demo: el Agente Consulta contesta una pregunta | Front de demo |
+| `POST` | [`/demo/casos/<id>/analizar`](#post-democasosidanalizar) | Demo: calidad, detección, normas y reporte de un caso consultado | Front |
 | `GET` | [`/agentes`](#get-agentes) | Laptops con Ollama registradas y su estado | Front, monitoreo |
 | `GET` | [`/agentes/<agente_id>`](#get-agentesagente_id) | Ver un agente | Front, monitoreo |
 | `POST` | [`/agentes/<agente_id>/verificar`](#post-agentesagente_idverificar) | Verificar ahora si un agente responde | Front, administrador |
@@ -306,6 +308,34 @@ Descarga el archivo. Para mostrar el PDF en el front basta con un
   pide `/archivo` cada vez.
 - **404** `reporte_no_encontrado` · **500** `reporte_corrupto` ·
   **503** `almacen_no_disponible` (S3 no responde o vencieron las credenciales del laboratorio).
+
+## `GET /casos/<id>/reportes/<version>/contenido`
+
+Igual que `/archivo`, pero **nunca redirige a S3**: el backend lee el archivo, verifica su SHA-256
+y entrega los bytes (`X-Content-SHA256`). Es para visores que leen el PDF con `fetch` (pdf.js),
+porque el navegador no puede leer el bucket directo sin CORS. Requiere sesión.
+Errores: `404 reporte_no_encontrado`, `500 reporte_corrupto`, `503 almacen_no_disponible`.
+
+## `POST /demo/casos/<id>/analizar`
+
+Solo para la demo, mientras no existe el orquestador. Sobre un caso en `consultado` (creado con
+`/demo/preguntar`) corre Calidad, Detección, Normativo y Reportes y deja el caso en `en_revision`.
+**No acepta filas del navegador:** vuelve a ejecutar, con `agent_ro`, el SQL de la bitácora del caso.
+
+```json
+{"narrativa_llm": false}
+```
+
+Con `narrativa_llm: false` (por defecto) el PDF usa el texto de respaldo del Agente Reportes y
+tarda segundos; con `true` redacta con el modelo (una llamada por señal: minutos). Sin laptop
+disponible se omite el RAG (el reporte lo declara) salvo que se pida `narrativa_llm`.
+
+Respuesta `200`: `caso_id`, `estado: "en_revision"`, `senales`, `evaluadas`, `no_evaluables`,
+`normas`, `narrativa_llm`, `rag` y `reporte` (`version`, `formato`, `tamano_bytes`, `sha256`).
+Si el caso no tiene contratos que analizar: `200` con `estado: "bloqueado"` y `motivo`.
+Errores: `404 caso_no_encontrado`, `409 transicion_invalida` (el caso no está en `consultado`),
+`409 sin_consulta`, `503 agente_no_disponible` (se pidió el modelo sin laptop),
+`502 analisis_fallo`.
 
 ## `POST /demo/preguntar`
 
