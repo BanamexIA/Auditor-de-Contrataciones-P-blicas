@@ -24,7 +24,7 @@ fi
 
 echo ">> Levantando base..."
 $DC up -d --build db
-until $DC exec -T db pg_isready -U "$PGU" -d "$PGD" >/dev/null 2>&1; do sleep 2; done
+until $DC exec -T db pg_isready -U "$PGU" -d "$PGD" </dev/null >/dev/null 2>&1; do sleep 2; done
 $DC stop backend >/dev/null 2>&1 || true
 
 echo ">> Restaurando base..."
@@ -38,13 +38,13 @@ if [ -f "$WORK/s3_bucket.txt" ]; then
   if [ "$OLD" != "$NEW" ]; then
     echo ">> Reescribiendo URIs s3://$OLD/ -> s3://$NEW/ en audit.reportes"
     $DC exec -T db psql -U "$PGU" -d "$PGD" -v ON_ERROR_STOP=1 \
-      -c "UPDATE audit.reportes SET uri = replace(uri, 's3://$OLD/', 's3://$NEW/') WHERE uri LIKE 's3://$OLD/%';"
+      -c "UPDATE audit.reportes SET uri = replace(uri, 's3://$OLD/', 's3://$NEW/') WHERE uri LIKE 's3://$OLD/%';" </dev/null
   fi
 fi
 
 echo ">> Levantando backend y restaurando reportes locales..."
 $DC up -d --build backend
-until $DC exec -T backend true >/dev/null 2>&1; do sleep 2; done
+until $DC exec -T backend true </dev/null >/dev/null 2>&1; do sleep 2; done
 $DC exec -T backend tar -C /app/data/reportes -xzf - < "$WORK/reportes.tar.gz"
 
 echo ">> Restauracion completa (respaldo del commit $COMMIT)."

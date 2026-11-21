@@ -15,10 +15,10 @@ mkdir -p "$OUT_DIR"
 
 echo ">> Volcando base ${POSTGRES_DB:-auditor_contrataciones} (con duenos y permisos)..."
 $DC exec -T db pg_dump -U "${POSTGRES_USER:-postgres}" \
-  -d "${POSTGRES_DB:-auditor_contrataciones}" -Fc > "$WORK/db.dump"
+  -d "${POSTGRES_DB:-auditor_contrataciones}" -Fc < /dev/null > "$WORK/db.dump"
 
 echo ">> Reportes del volumen local (incluye los local:// anteriores a S3)..."
-$DC exec -T backend tar -C /app/data/reportes -czf - . > "$WORK/reportes.tar.gz"
+$DC exec -T backend tar -C /app/data/reportes -czf - . < /dev/null > "$WORK/reportes.tar.gz"
 
 if [ "${REPORTES_ALMACEN:-local}" = "s3" ] && [ -n "${REPORTES_S3_BUCKET:-}" ]; then
   echo ">> Reportes en S3 (s3://$REPORTES_S3_BUCKET/reportes)..."
