@@ -1,0 +1,83 @@
+# Casos de empresa (A5, mejora 8): preguntas sobre un proveedor, como en la ficha
+# de empresa de la demo. Van aparte del golden set por dos razones: la medición
+# del golden set sigue siendo comparable con la de A4, y estos casos no se usaron
+# para ajustar el prompt, así que miden si el agente generaliza.
+#
+# Los proveedores son personas morales que aparecen en ComprasMX 2026 (muestra
+# de la base del 2026-11-17). El resultado esperado lo calcula el medidor con
+# sql_esperado; si alguno sale vacío, el resumen lo avisa.
+#
+# Pendiente con la base encendida: agregar una empresa con coincidencia en el
+# 69-B por RFC (alta) y otra solo por nombre (media), que pide la demo.
+- id: e01
+  pregunta: ¿Cuántos contratos tiene Molinera de México en ComprasMX?
+  dificultad: facil
+  tipo_esperado: sql
+  sql_esperado: |
+    SELECT COUNT(*) AS contratos
+    FROM clean.v_contratos_agente
+    WHERE fuente = 'comprasmx'
+      AND proveedor_normalizado = 'MOLINERA DE MEXICO'
+    LIMIT 1
+  notas: proveedor_normalizado quita acentos, puntuación y "SA DE CV" (etl/build_clean.py).
+- id: e02
+  pregunta: ¿Cuál es el importe registrado de los contratos de Molinera de México en ComprasMX, por moneda?
+  dificultad: media
+  tipo_esperado: sql
+  sql_esperado: |
+    SELECT moneda, SUM(importe) AS importe_registrado
+    FROM clean.v_contratos_agente
+    WHERE fuente = 'comprasmx'
+      AND proveedor_normalizado = 'MOLINERA DE MEXICO'
+    GROUP BY moneda
+    ORDER BY moneda
+    LIMIT 10
+  notas: Importe registrado, no gasto pagado; se separa por moneda.
+- id: e03
+  pregunta: ¿Cuántos contratos de Brand and Push hay en ComprasMX por tipo de procedimiento?
+  dificultad: media
+  tipo_esperado: sql
+  sql_esperado: |
+    SELECT tipo_procedimiento_norm, COUNT(*) AS contratos
+    FROM clean.v_contratos_agente
+    WHERE fuente = 'comprasmx'
+      AND proveedor_normalizado = 'BRAND AND PUSH'
+    GROUP BY tipo_procedimiento_norm
+    ORDER BY tipo_procedimiento_norm
+    LIMIT 10
+  notas: La clasificación del tipo de procedimiento es preliminar.
+- id: e04
+  pregunta: ¿Cuántos contratos de Molinos Azteca tienen coincidencia con el listado 69-B?
+  dificultad: dificil
+  tipo_esperado: sql
+  sql_esperado: |
+    SELECT COUNT(DISTINCT c.codigo_contrato) AS contratos_con_coincidencia
+    FROM clean.v_contratos_agente AS c
+    JOIN clean.v_coincidencias_69b_agente AS m
+      ON m.codigo_contrato = c.codigo_contrato
+    WHERE c.proveedor_normalizado = 'MOLINOS AZTECA'
+    LIMIT 1
+  notas: Un conteo siempre devuelve una fila, aunque sea cero. Una coincidencia es una señal para revisión humana, no una determinación.
+- id: e05
+  pregunta: Lista los 10 contratos más recientes de Molinera de México en ComprasMX, con su código, fecha de inicio, importe y moneda.
+  dificultad: media
+  tipo_esperado: sql
+  sql_esperado: |
+    SELECT codigo_contrato, fecha_inicio, importe, moneda
+    FROM clean.v_contratos_agente
+    WHERE fuente = 'comprasmx'
+      AND proveedor_normalizado = 'MOLINERA DE MEXICO'
+    ORDER BY fecha_inicio DESC, codigo_contrato
+    LIMIT 10
+  notas: Lista con el orden y las columnas dichos en la pregunta.
+- id: e06
+  pregunta: ¿Cuántos contratos tuvo Molinera de México en 2025?
+  tipo_esperado: sin_datos
+  notas: No hay contratos con inicio en 2025 en ninguna fuente.
+  sql_ingenuo: |
+    SELECT COUNT(*) AS contratos
+    FROM clean.v_contratos_agente
+    WHERE proveedor_normalizado = 'MOLINERA DE MEXICO'
+      AND fecha_inicio >= DATE '2025-01-01'
+      AND fecha_inicio < DATE '2026-01-01'
+    LIMIT 1

@@ -21,6 +21,13 @@ laptop solo ejecuta el modelo y nunca recibe credenciales de la base.
 - **Tools 1 y 4** viven hoy en `eval/run_benchmark.py`; se mueven a `agents/consulta/` en A3. Usan el rol `agent_ro`, una transacción de solo lectura y un límite de 60 s.
 - **Tool 2** llama a las tools 3 y +1 por dentro. Sin `execute` no ejecuta SQL. Con `execute` (la tool 4) también ejecuta el SQL que pasó la cobertura; si PostgreSQL lo rechaza (columna inexistente, `GROUP BY` mal armado, fecha inválida…), le pasa al modelo el SQL y el error de la base en el mismo y único reintento. Los errores de conexión y el límite de 60 s no se reintentan: se propagan.
 - **Si el SQL del modelo no trae `LIMIT`**, la tool 2 le agrega `LIMIT 200` antes de validarlo y lo anota en `supuestos`, en lugar de gastar el reintento. Un `LIMIT` que sí viene pero no es válido (mayor a 200, `ALL`, texto o `FETCH`) se sigue rechazando. La tool +1 no cambia: sigue exigiendo el `LIMIT`, así que la tool 4 y el benchmark se comportan igual.
+- **La tool +1 revisa cada columna** contra la vista donde la busca la consulta, siguiendo alias y subconsultas. Una columna en la vista equivocada (por ejemplo `rfc_exacto` en `v_contratos_agente`) se rechaza antes de llegar a PostgreSQL, con un mensaje que indica en qué vista está y que hay que unirlas por `codigo_contrato`. La lista de columnas es `VIEW_COLUMNS` en `agents/consulta/validator.py`; una prueba la compara con `etl/sql/07_fase4b_transform.sql`, así que si T6 cambia las vistas hay que actualizarla.
+- **Erratas de alias:** si el SQL usa `alias_columna` (por ejemplo `c_fuente`) y esa columna no se resuelve, pero `alias.columna` sí, la tool 2 la corrige antes de validar y no gasta el reintento. Un nombre que la misma consulta define (como `COUNT(*) AS c_total`) no se toca.
+- **Valores de columnas categóricas:** la tool +1 rechaza un texto comparado con `fuente`, `tipo_procedimiento_norm`, `fecha_inicio_estado` o `nivel_confianza` que esa columna nunca tiene, y el mensaje lista sus valores (`CATEGORY_VALUES` en `agents/consulta/validator.py`). Si la vista gana un valor nuevo, hay que agregarlo ahí.
+- **Desempate del orden:** si el SQL selecciona `codigo_contrato` y tiene `ORDER BY` y `LIMIT`, pero no ordena por `codigo_contrato`, la tool 2 lo agrega al final del `ORDER BY`. Sin eso, los contratos que empatan (por ejemplo, con la misma fecha de inicio) salen en cualquier orden y el `LIMIT` puede quedarse con otros cada vez que se corre la misma consulta. No cambia lo que se pregunta, así que no se anota en `supuestos`. No se aplica a consultas con agregados, salvo que agrupen por `codigo_contrato`.
+- **Nombres de proveedor:** si el SQL compara `proveedor_normalizado` con un texto (`=`, `<>`, `IN`, `LIKE`, `ILIKE`), la tool 2 pasa ese texto a la forma normalizada del ETL (`agents/consulta/providers.py`) y lo anota en `supuestos`. Además, `=`, `<>` e `IN` buscan el nombre con y sin su tipo de sociedad al final (`S A DE C V`, `S DE R L DE C V` y los demás de `SUFFIX_TAILS`), porque el ETL los conserva en parte de los contratos (decisión 9 de `docs/vistas_estrella.md`); también se anota en `supuestos`.
+- **Conceptos que las fuentes no registran** (cancelaciones, rescisiones, convenios modificatorios, pagos, sanciones e inhabilitaciones, penalizaciones y multas) **y datos que las vistas no tienen** (la situación del contribuyente en el 69-B): si la pregunta trata de uno, la tool 2 responde `sin_datos` con un motivo escrito por el código, sin importar lo que propuso el modelo. Las listas están en `agents/consulta/concepts.py` (`MISSING_CONCEPTS` y `VIEW_GAPS`); el prompt usa la primera.
+- **Los supuestos sobre cobertura** (años completos o incompletos, periodos sin datos) los escribe solo la tool 3. La tool 2 descarta los que escriba el modelo sobre ese tema y conserva los de interpretación. Si el modelo responde `sin_datos` para años que sí tienen contratos, la tool 2 lo reintenta con lo que dice la cobertura (etapa `cobertura` en `intentos_fallidos`).
 - **Tool 4** vuelve a validar el SQL antes de ejecutarlo.
 - **La cobertura** se carga una vez al arrancar el backend con `COVERAGE_QUERY` (`agents/consulta/coverage.py`), que es la métrica M9 de `docs/capa_semantica.md`.
 - **El prompt de sistema** se arma una vez al arrancar con `build_system_prompt(schema_context(), ejemplos)` de `agents/consulta/prompt.py`. El benchmark tiene otra función con el mismo nombre que solo pide SQL; no es la del agente.
@@ -38,13 +45,13 @@ laptop solo ejecuta el modelo y nunca recibe credenciales de la base.
 
 ## Salida de la tool 2
 
-Siempre es un objeto con `tipo` e `intentos` (1 o 2).
+Siempre es un objeto con `tipo`, `intentos` (1 o 2) e `intentos_fallidos`: una lista, vacía si el primer intento salió bien, con `intento`, `etapa` (`formato`, `validador`, `cobertura` o `base`), `error` y el `sql` que propuso el modelo, si lo hubo. Sirve para registrar en la bitácora un `sql_rechazado` por intento.
 
 | `tipo` | Campos | Significa |
 |---|---|---|
 | `sql` | `sql`, `filtros`, `supuestos`; `filas` si se pasó `execute` | Hay un SQL validado y con cobertura, listo para la tool 4, o ya ejecutado |
 | `aclaracion` | `pregunta`, `opciones` (2 o más) | La solicitud es ambigua; no se generó SQL |
-| `sin_datos` | `motivo`; `sql_descartado` si el SQL lo detuvo la tool 3 | Las fuentes no tienen ese periodo o ese campo |
+| `sin_datos` | `motivo`; `sql_descartado` si el SQL lo detuvo la tool 3 o la revisión de conceptos | Las fuentes no tienen ese periodo, ese campo o ese concepto |
 | `error` | `motivo`; `sql_rechazado` si el último SQL lo rechazó PostgreSQL | El modelo no dio una respuesta válida en 2 intentos |
 
 ```json

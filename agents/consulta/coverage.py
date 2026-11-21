@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 import statistics
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any, Iterable
@@ -77,6 +79,53 @@ class Coverage:
         )
 
 
+_YEAR_IN_TEXT = re.compile(r"\b((?:19|20)\d{2})\b")
+# A "no data" claim, over the text without accents and in lowercase.
+_NO_DATA_TALK = re.compile(
+    r"\b(no (hay|tiene|tienen|registra|registran|existen?|cuenta con)|sin|ningun\w*)\b"
+    r".{0,40}\b(contratos?|datos|registros|informacion)\b"
+)
+SOURCE_WORDS = {"comprasmx": ("comprasmx",), "historico": ("historico", "compranet")}
+
+
+def contradicted_no_data(motivo: str, coverage: Coverage) -> str | None:
+    """Which years of a "no data" reason do have contracts, or None (A5, mejora 17).
+
+    On 2026-11-20 the model answered q17 with "El histórico de CompraNet no
+    registra contratos con inicio en 2024", which has 1,836. The claim is
+    contradicted only when every year it names has contracts in the sources it
+    names (in any source if it names none), so "no hay contratos en 2025" stands.
+    """
+    plain = _plain(motivo)
+    years = {int(year) for year in _YEAR_IN_TEXT.findall(plain)}
+    if not years or not _NO_DATA_TALK.search(plain):
+        return None
+    sources = {
+        source for source, words in SOURCE_WORDS.items() if any(word in plain for word in words)
+    } or set(coverage.years)
+    found: dict[str, set[int]] = {}
+    for year in years:
+        holders = [source for source in sorted(sources) if year in coverage.years.get(source, ())]
+        if not holders:
+            return None
+        for source in holders:
+            found.setdefault(source, set()).add(year)
+    parts = []
+    for source, source_years in sorted(found.items()):
+        partial = source_years & coverage.partial_years.get(source, frozenset())
+        note = f" ({format_years(partial)} incompleto)" if partial else ""
+        parts.append(
+            f"{SOURCE_NAMES.get(source, source)} sí tiene contratos con inicio en "
+            f"{format_years(source_years)}{note}"
+        )
+    return "; ".join(parts)
+
+
+def _plain(text: str) -> str:
+    decomposed = unicodedata.normalize("NFKD", text.casefold())
+    return "".join(char for char in decomposed if not unicodedata.combining(char))
+
+
 @dataclass
 class CoverageCheck:
     sin_datos: str | None = None
@@ -143,6 +192,22 @@ def _is_start_year(node: exp.Expression) -> bool:
     )
 
 
+def _start_trunc_unit(node: exp.Expression) -> str | None:
+    """'YEAR' or 'MONTH' for DATE_TRUNC(unit, fecha_inicio); None otherwise."""
+    node = _unwrap(node)
+    if not isinstance(node, (exp.TimestampTrunc, exp.DateTrunc)) or not _is_column(node.this, "fecha_inicio"):
+        return None
+    unit = node.args.get("unit")
+    name = unit.name.upper() if unit is not None else ""
+    return name if name in ("YEAR", "MONTH") else None
+
+
+def _next_period(day: date, unit: str) -> date:
+    if unit == "YEAR":
+        return date(day.year + 1, 1, 1)
+    return date(day.year + 1, 1, 1) if day.month == 12 else date(day.year, day.month + 1, 1)
+
+
 def _date_value(node: exp.Expression) -> date | None:
     node = _unwrap(node)
     if isinstance(node, exp.Literal) and node.is_string:
@@ -184,6 +249,20 @@ def _apply_comparison(filters: _Filters, kind: type, target: exp.Expression, val
             exp.LT: (None, day),
             exp.LTE: (None, day + timedelta(days=1)),
             exp.EQ: (day, day + timedelta(days=1)),
+        }[kind]
+    elif _start_trunc_unit(target):
+        # DATE_TRUNC('year', fecha_inicio) = DATE '2024-01-01' covers the whole period
+        # (A5, mejora 6: the coverage notes must not depend on how the model wrote it).
+        day = _date_value(value)
+        if day is None:
+            return
+        following = _next_period(day, _start_trunc_unit(target))
+        bounds = {
+            exp.GTE: (day, None),
+            exp.GT: (following, None),
+            exp.LT: (None, day),
+            exp.LTE: (None, following),
+            exp.EQ: (day, following),
         }[kind]
     elif _is_start_year(target):
         year = _int_value(value)

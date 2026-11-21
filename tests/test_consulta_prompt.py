@@ -1,18 +1,23 @@
 import json
+import re
 import unittest
 from pathlib import Path
 
 import yaml
 
 from agents.consulta.prompt import (
+    BOOLEAN_COLUMNS,
     BUILT_IN_EXAMPLES,
     LIMIT_ADDED_NOTE,
+    SUFFIX_NOTE,
     ResponseFormatError,
     build_system_prompt,
     build_user_prompt,
+    is_system_note,
     parse_response,
+    provider_note,
 )
-from agents.consulta.validator import MAX_SQL_ROWS, SQLValidationError
+from agents.consulta.validator import MAX_SQL_ROWS, VIEW_COLUMNS, SQLValidationError, validate_sql
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,6 +42,65 @@ class SystemPromptTests(unittest.TestCase):
     def test_includes_the_data_rules(self):
         self.assertIn("No hay contratos con inicio en 2025", self.prompt)
         self.assertIn("COUNT(DISTINCT codigo_contrato)", self.prompt)
+
+    def test_includes_the_rules_for_the_a4_mistakes(self):
+        # A5, mejora 4: q16 (SELECT *), q08 (list with GROUP BY), c13 (missing filter),
+        # q06 ("preliminar" read as a filter) and q07 (69-B column in the wrong view).
+        for fragment in (
+            "Nunca uses SELECT *",
+            "En una lista no uses GROUP BY",
+            "todas las condiciones de la pregunta",
+            "no filtres por tipo_procedimiento_estado",
+            "JOIN clean.v_coincidencias_69b_agente AS m ON m.codigo_contrato = c.codigo_contrato",
+        ):
+            with self.subTest(regla=fragment):
+                self.assertIn(fragment, self.prompt)
+
+    def test_includes_the_second_round_rules(self):
+        # A5, mejoras 11 to 13: q18 (LIMIT as a cut), e01-e05 (provider search), q15 (estado vs valida).
+        for fragment in (
+            "el LIMIT es un tope de seguridad, no un recorte",
+            "filtra clean.v_contratos_agente con proveedor_normalizado",
+            "nombre_de_la_uc es la unidad compradora",
+            "si preguntan por el estado de la fecha de inicio, usa esa columna",
+        ):
+            with self.subTest(regla=fragment):
+                self.assertIn(fragment, self.prompt)
+
+    def test_boolean_rule_names_every_boolean_column_of_the_views(self):
+        declared = set()
+        for name in ("04_clean.sql", "06_fase4b_schema.sql"):
+            text = (ROOT / "etl" / "sql" / name).read_text(encoding="utf-8")
+            declared |= set(re.findall(r"(\w+)\s+BOOLEAN\b", text, flags=re.IGNORECASE))
+        in_views = {column for columns in VIEW_COLUMNS.values() for column in columns}
+        self.assertEqual(set(BOOLEAN_COLUMNS), declared & in_views)
+        self.assertIn("nunca comparadas con texto como 'S' o 'si'", self.prompt)
+
+    def test_lists_the_concepts_the_sources_lack(self):
+        # A5, mejora 5: the same list the agent checks in code.
+        for concept in ("cancelaciones", "rescisiones", "convenios modificatorios", "pagos", "sanciones", "multas"):
+            with self.subTest(concepto=concept):
+                self.assertIn(concept, self.prompt)
+        self.assertIn("no lo sustituyas con otra columna", self.prompt)
+
+    def test_leaves_coverage_notes_to_the_system(self):
+        # A5, mejora 6: the old rule asked the model to write the partial-year note.
+        self.assertNotIn("anota en supuestos que el año está incompleto", self.prompt)
+        self.assertIn("eso lo agrega el sistema", self.prompt)
+
+    def test_lists_every_procedure_type_of_the_semantic_layer(self):
+        document = (ROOT / "docs" / "capa_semantica.md").read_text(encoding="utf-8")
+        for value in ("adjudicacion_directa", "invitacion_tres_personas", "licitacion_publica", "otro", "sin_dato"):
+            with self.subTest(valor=value):
+                self.assertIn(f"`{value}`", document)
+                self.assertIn(value, self.prompt)
+
+    def test_the_join_in_the_rules_passes_the_validator(self):
+        validate_sql(
+            "SELECT c.codigo_contrato, c.fuente, m.nivel_confianza "
+            "FROM clean.v_contratos_agente AS c JOIN clean.v_coincidencias_69b_agente AS m "
+            "ON m.codigo_contrato = c.codigo_contrato LIMIT 20"
+        )
 
     def test_renders_every_example_as_a_valid_response(self):
         self.assertEqual(self.prompt.count("Pregunta: "), len(self.examples) + len(BUILT_IN_EXAMPLES))
@@ -92,6 +156,41 @@ class ParseResponseTests(unittest.TestCase):
         }))
         self.assertTrue(response["sql"].endswith(f"LIMIT {MAX_SQL_ROWS}"))
         self.assertEqual(response["supuestos"], ["Supuesto del modelo.", LIMIT_ADDED_NOTE])
+
+    def test_a_list_without_limit_gets_the_limit_and_the_tiebreaker_without_a_new_note(self):
+        response = parse_response(json.dumps({
+            "tipo": "sql",
+            "sql": "SELECT codigo_contrato, fecha_inicio FROM clean.v_contratos_agente "
+                   "ORDER BY fecha_inicio DESC",
+        }))
+        self.assertTrue(
+            response["sql"].endswith(f"ORDER BY fecha_inicio DESC, codigo_contrato LIMIT {MAX_SQL_ROWS}")
+        )
+        self.assertEqual(response["supuestos"], [LIMIT_ADDED_NOTE])
+
+    def test_provider_name_is_normalized_with_a_note(self):
+        response = parse_response(json.dumps({
+            "tipo": "sql",
+            "sql": "SELECT COUNT(*) AS contratos FROM clean.v_contratos_agente "
+                   "WHERE fuente = 'comprasmx' AND proveedor_normalizado = 'Molinera de México' LIMIT 1",
+        }))
+        self.assertIn("proveedor_normalizado IN ('MOLINERA DE MEXICO', 'MOLINERA DE MEXICO S A DE C V'", response["sql"])
+        self.assertEqual(response["supuestos"], [provider_note("MOLINERA DE MEXICO"), SUFFIX_NOTE])
+
+    def test_alias_typo_is_fixed_before_validating(self):
+        """A5, mejora 15: q08's first attempt, which used to cost the retry."""
+        response = parse_response(json.dumps({
+            "tipo": "sql",
+            "sql": "SELECT c.codigo_contrato, c_fuente, c.fecha_inicio FROM clean.v_contratos_agente AS c "
+                   "JOIN clean.v_coincidencias_69b_agente AS m ON m.codigo_contrato = c.codigo_contrato "
+                   "WHERE m.requiere_revision_humana ORDER BY c.fecha_inicio DESC LIMIT 20",
+        }))
+        self.assertIn("SELECT c.codigo_contrato, c.fuente, c.fecha_inicio", response["sql"])
+        self.assertIn("ORDER BY c.fecha_inicio DESC, c.codigo_contrato LIMIT 20", response["sql"])
+        self.assertEqual(response["supuestos"], [])
+
+    def test_system_notes_survive_the_coverage_filter(self):
+        self.assertTrue(is_system_note(SUFFIX_NOTE))
 
     def test_sql_with_its_own_limit_gets_no_note(self):
         response = parse_response(json.dumps({"tipo": "sql", "sql": VALID_SQL}))
