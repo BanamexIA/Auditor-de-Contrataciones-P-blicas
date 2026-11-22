@@ -49,7 +49,7 @@ Siempre es un objeto con `tipo`, `intentos` (1 o 2) e `intentos_fallidos`: una l
 
 | `tipo` | Campos | Significa |
 |---|---|---|
-| `sql` | `sql`, `filtros`, `supuestos`; `filas` si se pasó `execute` | Hay un SQL validado y con cobertura, listo para la tool 4, o ya ejecutado |
+| `sql` | `sql`, `filtros`, `supuestos`; `filas` y `conteo` si se pasó `execute` | Hay un SQL validado y con cobertura, listo para la tool 4, o ya ejecutado |
 | `aclaracion` | `pregunta`, `opciones` (2 o más) | La solicitud es ambigua; no se generó SQL |
 | `sin_datos` | `motivo`; `sql_descartado` si el SQL lo detuvo la tool 3 o la revisión de conceptos | Las fuentes no tienen ese periodo, ese campo o ese concepto |
 | `error` | `motivo`; `sql_rechazado` si el último SQL lo rechazó PostgreSQL | El modelo no dio una respuesta válida en 2 intentos |
@@ -59,6 +59,28 @@ Siempre es un objeto con `tipo`, `intentos` (1 o 2) e `intentos_fallidos`: una l
  "sql": "SELECT COUNT(*) AS contratos FROM clean.v_contratos_agente WHERE fuente = 'historico' AND fecha_inicio >= CAST('2024-01-01' AS DATE) AND fecha_inicio < CAST('2025-01-01' AS DATE) LIMIT 1",
  "filtros": ["fuente: histórico", "inicio en 2024"],
  "supuestos": ["Cobertura incompleta en CompraNet histórico para 2024."]}
+```
+
+**`conteo` (HU-01, A6).** Con `execute`, la respuesta `sql` dice cuántos registros
+la respaldan (`agents/consulta/counts.py`):
+
+| Campo | Qué es |
+|---|---|
+| `filas` | Las filas que devolvió la consulta |
+| `filas_totales` | Las que habría sin el `LIMIT`. Solo se consulta a la base si las filas llegaron al `LIMIT` |
+| `truncado` | `true` si el `LIMIT` cortó el resultado; entonces también se agrega un aviso en `supuestos` ("El resultado se cortó: se muestran 200 de 784 filas por el LIMIT.") |
+| `registros` | Cuántos registros de las vistas resume la respuesta, antes del `LIMIT`. En una consulta con agregados (`COUNT`, `SUM`, `GROUP BY`) son los que entran a los grupos; en una lista, cada fila es un registro |
+
+Las consultas de conteo salen del mismo SQL y pasan por el validador. Si fallan
+(por ejemplo, por el límite de 60 s), los campos quedan en `null` y la respuesta
+sigue. `count_records=False` lo apaga; el medidor lo apaga para que el tiempo
+por pregunta siga siendo comparable con A4 y A5.
+
+```json
+{"tipo": "sql", "intentos": 1,
+ "sql": "SELECT institucion, COUNT(*) AS contratos FROM clean.v_contratos_agente WHERE fuente = 'comprasmx' GROUP BY institucion ORDER BY contratos DESC, institucion LIMIT 200",
+ "supuestos": ["El resultado se cortó: se muestran 200 de 784 filas por el LIMIT."],
+ "conteo": {"filas": 200, "filas_totales": 784, "truncado": true, "registros": 84676}}
 ```
 
 ```json
@@ -101,7 +123,7 @@ la tabla: entrega los datos y el backend registra.
 | El modelo propone un SQL | `sql_generado` | `sql` |
 | El validador lo rechaza | `sql_rechazado` | `sql`, `motivo` |
 | La tool 3 lo descarta por falta de datos | `sql_rechazado` | `sql`, `motivo` (el de `sin_datos`) |
-| La tool 4 lo ejecuta | `sql_ejecutado` | `sql`, `vistas`, `filas`, `duracion_ms`, `truncado` (`true` si las filas llegan al `LIMIT`) |
+| La tool 4 lo ejecuta | `sql_ejecutado` | `sql`, `vistas`, `filas`, `duracion_ms`, `truncado` (de `conteo`: `true` si el `LIMIT` cortó el resultado) |
 | Aclaración o error | `transicion` a `bloqueado` | El `motivo` del bloqueo |
 
 ## Lo que falta en el código (A3)
@@ -110,7 +132,7 @@ la tabla: entrega los datos y el backend registra.
 2. Que la tool 2 reciba una función para registrar eventos, o devuelva el SQL y el error de cada intento, para generar `sql_generado` y `sql_rechazado` por intento.
 3. Que la tool 2 llame al modelo a través de `llamar_llm`, para registrar cada intento.
 4. Pasar `AGENT_RO_USER` y `AGENT_RO_PASSWORD` al contenedor del backend en `docker-compose.yml`.
-5. Devolver, junto con las filas, el conteo y los empates en el corte (HU-01), pidiendo un registro más del `LIMIT` cuando la pregunta sea un ranking.
+5. ~~Devolver, junto con las filas, el conteo (HU-01)~~: hecho el 2026-11-21 (`conteo`). Falta avisar de empates en el corte de un ranking (por ejemplo, si el lugar 10 y el 11 tienen el mismo número de contratos), pidiendo un registro más del `LIMIT`.
 
 ## Decisiones pendientes
 

@@ -240,7 +240,10 @@ def run(model: str | None, repetitions: int, output_root: Path, cases_path: Path
     }
 
     def answer_fn(question: str) -> dict[str, Any]:
-        return answer_question(question, client, system_prompt, coverage, execute=execute_read_only)
+        # The count (HU-01) changes neither the SQL nor the verdict; it stays off so the
+        # time per question remains comparable with A4 and A5.
+        return answer_question(question, client, system_prompt, coverage, execute=execute_read_only,
+                               count_records=False)
 
     results = []
     for repetition in range(1, repetitions + 1):
