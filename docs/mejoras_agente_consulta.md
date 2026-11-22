@@ -201,3 +201,12 @@ mejora 17: el modelo sigue diciendo que no hay 2024.
 Antes de reportarlo como resultado de A5: las mejoras 15 a 19 salieron de los
 mismos casos que se miden, así que hace falta un conjunto de preguntas nuevas,
 sin usar, para saber cuánto generaliza el agente.
+
+**2026-11-21 — Preguntas nuevas:** `eval/casos_nuevos.yaml`, 8 casos (7 con SQL
+y 1 sin datos) escritos sin ver cómo responde el agente. Sus SQL esperados
+faltan de verificar con la base. No se deben usar para ajustar el agente antes
+de medirlas:
+
+```powershell
+.venv\Scripts\python -m eval.run_consulta --casos eval/casos_nuevos.yaml
+```

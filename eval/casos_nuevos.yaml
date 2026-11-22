@@ -1,0 +1,112 @@
+# Preguntas nuevas para medir si el Agente Consulta generaliza (A5, 2026-11-21).
+# Las escribió Alean sin ver cómo responde el agente. NO usarlas para ajustar el
+# prompt ni el código antes de medirlas: después de la mejora 19, los demás
+# archivos de casos ya se usaron para ajustar el agente.
+#
+# Cambios respecto a la versión original (para que la medición sirva, no para
+# hacerlas más fáciles):
+# - n03: era de ComprasMX, donde ningún contrato tiene importe nulo; la
+#   respuesta esperada habría salido vacía. Ahora es del histórico (5,182 nulos).
+# - n04: "hasta 10" no decía el orden y había 592 contratos que cumplían; ahora
+#   pide los 10 de fecha de inicio más lejana.
+# - Se quitaron dos: "fecha de inicio no parseable" (no hay ninguna, el conteo
+#   daría 0) y la lista de proveedores del 69-B sin RFC exacto (repetía el
+#   filtro de n05 y no decía columnas ni orden).
+#
+# POR VERIFICAR con la base encendida: que ningún resultado esperado salga vacío
+# o en cero sin sentido (sobre todo n05). Las cifras de las notas son del perfil
+# de la base del 2026-11-20.
+- id: n01
+  pregunta: ¿Cuántos contratos de ComprasMX hay por tipo de contratación?
+  dificultad: facil
+  tipo_esperado: sql
+  sql_esperado: |
+    SELECT tipo_contratacion, COUNT(*) AS contratos
+    FROM clean.v_contratos_agente
+    WHERE fuente = 'comprasmx'
+    GROUP BY tipo_contratacion
+    ORDER BY contratos DESC, tipo_contratacion
+    LIMIT 20
+  notas: 5 tipos; SERVICIOS 41,588 y ADQUISICIONES 36,014 son los más comunes. No confundir con contract_type ni con el tipo de procedimiento.
+- id: n02
+  pregunta: ¿Cuántos expedientes históricos hay por tipo de expediente?
+  dificultad: media
+  tipo_esperado: sql
+  sql_esperado: |
+    SELECT tipo_expediente, COUNT(DISTINCT codigo_expediente) AS expedientes
+    FROM clean.v_contratos_agente
+    WHERE fuente = 'historico'
+    GROUP BY tipo_expediente
+    ORDER BY expedientes DESC, tipo_expediente
+    LIMIT 100
+  notas: Cuenta expedientes distintos, no contratos (un expediente puede tener varios). 56 tipos de expediente. Se parece al ejemplo del prompt que cuenta contratos por tipo de expediente.
+- id: n03
+  pregunta: ¿Cuántos contratos de CompraNet histórico tienen importe nulo, por moneda?
+  dificultad: facil
+  tipo_esperado: sql
+  sql_esperado: |
+    SELECT moneda, COUNT(*) AS contratos
+    FROM clean.v_contratos_agente
+    WHERE fuente = 'historico'
+      AND importe IS NULL
+    GROUP BY moneda
+    ORDER BY contratos DESC, moneda
+    LIMIT 20
+  notas: 5,182 contratos del histórico tienen importe nulo; en ComprasMX no hay ninguno.
+- id: n04
+  pregunta: Lista los 10 contratos de ComprasMX con fecha de inicio futura más lejana, con código, proveedor y fecha de inicio.
+  dificultad: media
+  tipo_esperado: sql
+  sql_esperado: |
+    SELECT codigo_contrato, proveedor, fecha_inicio
+    FROM clean.v_contratos_agente
+    WHERE fuente = 'comprasmx'
+      AND fecha_inicio_futura
+    ORDER BY fecha_inicio DESC, codigo_contrato
+    LIMIT 10
+  notas: 592 contratos tienen inicio posterior a la fecha de descarga (2026-10-16). "Proveedor" es el nombre publicado, no proveedor_normalizado. Puede mostrar nombres de personas físicas; no usarla en la evidencia de A6.
+- id: n05
+  pregunta: ¿Cuántos contratos de ComprasMX tienen coincidencia por nombre normalizado exacto, pero no por RFC exacto?
+  dificultad: dificil
+  tipo_esperado: sql
+  sql_esperado: |
+    SELECT COUNT(DISTINCT c.codigo_contrato) AS contratos
+    FROM clean.v_contratos_agente AS c
+    JOIN clean.v_coincidencias_69b_agente AS m
+      ON m.codigo_contrato = c.codigo_contrato
+    WHERE c.fuente = 'comprasmx'
+      AND m.nombre_normalizado_exacto
+      AND NOT m.rfc_exacto
+    LIMIT 1
+  notas: POR VERIFICAR. ComprasMX tiene 27 contratos con coincidencia y casi todas son por RFC, así que el resultado puede ser muy chico o cero; si es cero, cambiarla. Es una señal para revisión humana.
+- id: n06
+  pregunta: ¿Cuántos contratos con coincidencia 69-B requieren revisión humana en cada año de inicio?
+  dificultad: dificil
+  tipo_esperado: sql
+  sql_esperado: |
+    SELECT EXTRACT(YEAR FROM c.fecha_inicio)::integer AS anio, COUNT(DISTINCT c.codigo_contrato) AS contratos
+    FROM clean.v_contratos_agente AS c
+    JOIN clean.v_coincidencias_69b_agente AS m
+      ON m.codigo_contrato = c.codigo_contrato
+    WHERE m.requiere_revision_humana
+      AND c.fecha_inicio_valida
+    GROUP BY EXTRACT(YEAR FROM c.fecha_inicio)::integer
+    ORDER BY anio
+    LIMIT 20
+  notas: Las dos fuentes; casi todas las coincidencias que requieren revisión son del histórico (solo por nombre). Debe llevar el aviso de años incompletos.
+- id: n07
+  pregunta: ¿Cuántos contratos hay por ley en ComprasMX?
+  dificultad: facil
+  tipo_esperado: sql
+  sql_esperado: |
+    SELECT ley, COUNT(*) AS contratos
+    FROM clean.v_contratos_agente
+    WHERE fuente = 'comprasmx'
+    GROUP BY ley
+    ORDER BY contratos DESC, ley
+    LIMIT 20
+  notas: LAASSP 77,271, LOPSRM 6,016, CEEP 1,345 y CREDEX 44.
+- id: n08
+  pregunta: ¿Cuántos convenios modificatorios tiene cada proveedor?
+  tipo_esperado: sin_datos
+  notas: Las fuentes no tienen un campo de convenios modificatorios (mejora 5). Algunos títulos dicen "CONVENIO MODIFICATORIO AL CONTRATO…", pero buscar en el texto no es confiable ni completo, así que no sustituye al dato.

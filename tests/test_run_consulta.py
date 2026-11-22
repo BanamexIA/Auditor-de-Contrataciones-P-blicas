@@ -76,9 +76,11 @@ class GoldenSetTests(unittest.TestCase):
 
 
 class CompanyCasesTests(unittest.TestCase):
-    """A5: the company questions of the demo (mejora 8) and the new 69-B ones."""
+    """A5: the company questions of the demo (mejora 8), the 69-B ones and the new ones."""
 
-    FILES = ("casos_empresa.yaml", "casos_empresa_69b.yaml")
+    FILES = ("casos_empresa.yaml", "casos_empresa_69b.yaml", "casos_nuevos.yaml")
+    # f04 asks for the 69-B situation (mejora 18) and n08 for amendments (mejora 5).
+    MISSING_CONCEPT_CASES = {"f04", "n08"}
 
     def setUp(self):
         self.folder = Path(__file__).resolve().parents[1] / "eval"
@@ -106,18 +108,17 @@ class CompanyCasesTests(unittest.TestCase):
         for cases in self.files.values():
             for case in cases:
                 sql = case.get("sql_esperado") or case.get("sql_ingenuo")
-                if not sql:  # f04: the model must say "sin datos" by itself; there is no naive SQL
+                if not sql:  # f04 and n08: "sin datos" comes from the concept check; there is no naive SQL
                     continue
                 with self.subTest(caso=case["id"]):
                     check = check_coverage(validate_sql(sql), coverage)
                     self.assertEqual(check.sin_datos is not None, case["tipo_esperado"] == "sin_datos")
 
-    def test_only_f04_is_caught_as_a_missing_concept(self):
-        """f04 asks for the 69-B situation, which the views lack (A5, mejora 18)."""
+    def test_only_the_expected_cases_are_caught_as_a_missing_concept(self):
         for cases in self.files.values():
             for case in cases:
                 with self.subTest(caso=case["id"]):
-                    if case["id"] == "f04":
+                    if case["id"] in self.MISSING_CONCEPT_CASES:
                         self.assertIsNotNone(missing_concept(case["pregunta"]))
                     else:
                         self.assertIsNone(missing_concept(case["pregunta"]))

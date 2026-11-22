@@ -360,7 +360,8 @@ class AddOrderTiebreakerTests(unittest.TestCase):
 
     def test_no_expected_sql_needs_it(self):
         """The expected answers already break their ties; the tiebreaker leaves them as they are."""
-        for name in ("golden_set.yaml", "casos_consulta.yaml", "casos_empresa.yaml", "casos_empresa_69b.yaml"):
+        for name in ("golden_set.yaml", "casos_consulta.yaml", "casos_empresa.yaml", "casos_empresa_69b.yaml",
+                     "casos_nuevos.yaml"):
             for case in yaml.safe_load((ROOT / "eval" / name).read_text(encoding="utf-8")):
                 if case.get("sql_esperado"):
                     with self.subTest(caso=case["id"]):
