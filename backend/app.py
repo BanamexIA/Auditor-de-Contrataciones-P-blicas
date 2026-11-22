@@ -12,6 +12,7 @@ from backend.agentes.verificacion import ClienteHttp
 from backend.usuarios.auth import configurar_auth, info_auth
 from backend.usuarios.repositorio import RepositorioUsuarios, RepositorioUsuariosSQL
 from backend.casos.api import bp as casos_bp
+from backend.demo.api import configurar_cors, demo_bp
 from backend.casos.repositorio import RepositorioCasos, RepositorioCasosSQL
 from backend.reportes.almacen import AlmacenReportes, almacen_desde_entorno
 
@@ -93,9 +94,11 @@ def create_app(
             return jsonify(status="error", database="unavailable"), 503
         return jsonify(status="ok", database="connected")
 
+    configurar_cors(app)  # antes que la autenticación: responde el preflight OPTIONS
     configurar_auth(app, repositorio_usuarios, auth_secreto)
     app.register_blueprint(casos_bp)
     app.register_blueprint(agentes_bp)
+    app.register_blueprint(demo_bp)
     _errores_en_json(app)
     return app
 

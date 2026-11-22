@@ -15,6 +15,15 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TIMEOUT_SECONDS = 120
 
 
+def timeout_seconds() -> float:
+    """Límite por llamada al modelo; LLM_TIMEOUT_S lo sube en laptops sin GPU."""
+    try:
+        value = float(os.getenv("LLM_TIMEOUT_S", "") or DEFAULT_TIMEOUT_SECONDS)
+    except ValueError:
+        return DEFAULT_TIMEOUT_SECONDS
+    return value if value > 0 else DEFAULT_TIMEOUT_SECONDS
+
+
 @dataclass(frozen=True)
 class LLMResponse:
     text: str
@@ -80,7 +89,7 @@ def post_json(
     )
     started = time.perf_counter()
     try:
-        with urllib.request.urlopen(request, timeout=DEFAULT_TIMEOUT_SECONDS) as response:
+        with urllib.request.urlopen(request, timeout=timeout_seconds()) as response:
             body = response.read()
     except urllib.error.HTTPError as exc:
         raise RuntimeError(f"LLM request failed with HTTP {exc.code} at {url}.") from exc

@@ -14,6 +14,7 @@ LLAMADA_LLM = "llamada_llm"
 SQL_GENERADO = "sql_generado"
 SQL_RECHAZADO = "sql_rechazado"
 SQL_EJECUTADO = "sql_ejecutado"
+CALIDAD_EVALUADA = "calidad_evaluada"
 REGLAS_EVALUADAS = "reglas_evaluadas"
 NORMAS_RECUPERADAS = "normas_recuperadas"
 REPORTE_GUARDADO = "reporte_guardado"
@@ -28,6 +29,7 @@ CAMPOS_OBLIGATORIOS: dict[str, frozenset[str]] = {
     SQL_GENERADO: frozenset({"sql"}),
     SQL_RECHAZADO: frozenset({"sql", "motivo"}),
     SQL_EJECUTADO: frozenset({"sql", "vistas", "filas", "duracion_ms", "truncado"}),
+    CALIDAD_EVALUADA: frozenset({"contratos", "problemas"}),
     REGLAS_EVALUADAS: frozenset({"reglas", "senales"}),
     NORMAS_RECUPERADAS: frozenset({"normas", "sin_soporte"}),
     REPORTE_GUARDADO: frozenset({"ruta", "sha256", "version"}),
