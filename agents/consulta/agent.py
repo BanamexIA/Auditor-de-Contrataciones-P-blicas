@@ -3,9 +3,10 @@ from __future__ import annotations
 import re
 from typing import Any, Callable, Sequence
 
-from psycopg import DataError, ProgrammingError
+from psycopg import DataError, Error, ProgrammingError
 
 from agents.consulta.concepts import missing_concept, missing_concept_reason, plain_text
+from agents.consulta.counts import count_support, empty_count, truncation_note
 from agents.consulta.coverage import Coverage, check_coverage, contradicted_no_data
 from agents.consulta.prompt import (
     ResponseFormatError,
@@ -39,6 +40,7 @@ def answer_question(
     coverage: Coverage,
     clarifications: Sequence[tuple[str, str]] = (),
     execute: Executor | None = None,
+    count_records: bool = True,
 ) -> dict[str, Any]:
     """Turns a question into a checked response.
 
@@ -52,6 +54,12 @@ def answer_question(
     it, the model gets the database error in that same single retry, and a
     successful answer carries the rows in "filas". Other database errors, such
     as a lost connection or the time limit, propagate.
+
+    With ``execute`` and ``count_records``, the answer also carries "conteo"
+    (HU-01): rows returned, rows without the LIMIT, whether the LIMIT cut the
+    result and how many view records the answer summarizes (see counts.py). A
+    cut result also gets a note in "supuestos". If the counting queries fail,
+    the counts are None and the answer is still returned.
 
     A "sin_datos" whose reason names years that do have contracts is also
     retried (stage "cobertura", A5, mejora 17).
@@ -119,6 +127,8 @@ def answer_question(
                 "Corrígelo y responde solo con el objeto JSON."
             )
             continue
+        if count_records:
+            result = _add_count(result, execute)
         return {**result, "intentos_fallidos": failed}
     failure = {
         "tipo": "error",
@@ -132,6 +142,21 @@ def answer_question(
     if rejected_sql:
         failure["sql_rechazado"] = rejected_sql
     return failure
+
+
+def _add_count(result: dict[str, Any], execute: Executor) -> dict[str, Any]:
+    """HU-01: how many records back the answer, and whether the LIMIT cut it."""
+    try:
+        count = count_support(result["sql"], result["filas"], execute)
+    except (Error, SQLValidationError):
+        # The answer is already valid; a failed count (for example, the time limit)
+        # leaves the counts empty instead of losing the rows.
+        count = empty_count(result["filas"])
+    supuestos = list(result.get("supuestos", []))
+    note = truncation_note(count)
+    if note:
+        supuestos.append(note)
+    return {**result, "conteo": count, "supuestos": supuestos}
 
 
 def _failed_attempt(attempt: int, stage: str, error: str, sql: str | None) -> dict[str, Any]:

@@ -360,7 +360,8 @@ class AddOrderTiebreakerTests(unittest.TestCase):
 
     def test_no_expected_sql_needs_it(self):
         """The expected answers already break their ties; the tiebreaker leaves them as they are."""
-        for name in ("golden_set.yaml", "casos_consulta.yaml", "casos_empresa.yaml", "casos_empresa_69b.yaml"):
+        for name in ("golden_set.yaml", "casos_consulta.yaml", "casos_empresa.yaml", "casos_empresa_69b.yaml",
+                     "casos_nuevos.yaml"):
             for case in yaml.safe_load((ROOT / "eval" / name).read_text(encoding="utf-8")):
                 if case.get("sql_esperado"):
                     with self.subTest(caso=case["id"]):
@@ -471,6 +472,114 @@ class ProjectQueriesTests(unittest.TestCase):
         for block in blocks:
             with self.subTest(sql=block.splitlines()[0]):
                 validate_sql(block)
+
+
+class PublishedNameTests(unittest.TestCase):
+    """A5, mejora 24: the published provider name compared with a text."""
+
+    def test_f03_as_the_model_wrote_it(self):
+        # casos_empresa_69b f03 on 2026-11-23: 0 rows instead of 16.
+        with self.assertRaisesRegex(SQLValidationError, "proveedor es el nombre como se publicó.*proveedor_normalizado"):
+            validate_sql(
+                f"SELECT c.codigo_contrato, c.fecha_inicio, c.importe, c.moneda FROM {CONTRATOS} AS c "
+                f"JOIN {COINCIDENCIAS} AS m ON m.codigo_contrato = c.codigo_contrato "
+                "WHERE m.proveedor = 'GRUPO ELIBZA' LIMIT 200"
+            )
+
+    def test_both_views_lists_and_inequalities(self):
+        for condition in (
+            "proveedor = 'BRAND AND PUSH'",
+            "'BRAND AND PUSH' = proveedor",
+            "proveedor <> 'BRAND AND PUSH'",
+            "proveedor IN ('BRAND AND PUSH', 'GRUPO ELIBZA')",
+        ):
+            with self.subTest(condition=condition):
+                with self.assertRaisesRegex(SQLValidationError, "proveedor es el nombre como se publicó"):
+                    validate_sql(f"SELECT COUNT(*) AS contratos FROM {CONTRATOS} WHERE {condition} LIMIT 1")
+
+    def test_normalized_name_patterns_and_projections_pass(self):
+        for query in (
+            f"SELECT COUNT(*) AS contratos FROM {CONTRATOS} WHERE proveedor_normalizado = 'GRUPO ELIBZA' LIMIT 1",
+            f"SELECT COUNT(*) AS contratos FROM {CONTRATOS} WHERE proveedor ILIKE '%ELIBZA%' LIMIT 1",
+            f"SELECT codigo_contrato, proveedor FROM {CONTRATOS} WHERE proveedor IS NULL LIMIT 20",
+            f"SELECT m.proveedor, COUNT(*) AS coincidencias FROM {COINCIDENCIAS} AS m GROUP BY m.proveedor LIMIT 20",
+        ):
+            with self.subTest(query=query):
+                validate_sql(query)
+
+
+class CurrencyTests(unittest.TestCase):
+    """A5, mejora 25: SUM or AVG of importe must not mix currencies."""
+
+    def test_c03_as_the_model_wrote_it(self):
+        # casos_consulta c03 on 2026-11-23: pesos, dollars and euros added together.
+        with self.assertRaisesRegex(SQLValidationError, r"SUM\(importe\) mezcla monedas.*moneda = 'MXN'"):
+            validate_sql(
+                f"SELECT SUM(importe) AS importe_total FROM {CONTRATOS} WHERE fuente = 'comprasmx' "
+                "AND tipo_procedimiento_norm = 'adjudicacion_directa' AND fecha_inicio_valida LIMIT 200"
+            )
+
+    def test_mixed_currencies_are_rejected(self):
+        for query in (
+            f"SELECT AVG(importe) AS promedio FROM {CONTRATOS} LIMIT 1",
+            f"SELECT fuente, SUM(c.importe) AS total FROM {CONTRATOS} AS c GROUP BY fuente LIMIT 5",
+            f"SELECT SUM(importe) AS total FROM {CONTRATOS} WHERE moneda IN ('MXN', 'USD') LIMIT 1",
+            f"SELECT SUM(importe) AS total FROM {CONTRATOS} WHERE (moneda = 'MXN' OR fuente = 'historico') LIMIT 1",
+        ):
+            with self.subTest(query=query):
+                with self.assertRaisesRegex(SQLValidationError, "mezcla monedas"):
+                    validate_sql(query)
+
+    def test_separated_or_single_currency_passes(self):
+        for query in (
+            f"SELECT moneda, SUM(importe) AS total FROM {CONTRATOS} GROUP BY moneda LIMIT 20",
+            f"SELECT fuente, moneda, SUM(importe) AS total FROM {CONTRATOS} GROUP BY 1, 2 LIMIT 20",
+            f"SELECT c.moneda AS divisa, AVG(c.importe) AS promedio FROM {CONTRATOS} AS c GROUP BY divisa LIMIT 20",
+            f"SELECT SUM(importe) AS total FROM {CONTRATOS} WHERE fuente = 'comprasmx' AND moneda = 'MXN' LIMIT 1",
+            f"SELECT SUM(importe) AS total FROM {CONTRATOS} WHERE moneda IN ('USD') LIMIT 1",
+            f"SELECT SUM(CASE WHEN moneda = 'MXN' THEN importe END) AS total_mxn FROM {CONTRATOS} LIMIT 1",
+            f"SELECT codigo_contrato, SUM(importe) OVER (PARTITION BY moneda) AS total FROM {CONTRATOS} LIMIT 20",
+            f"SELECT MAX(t.total) AS mayor FROM (SELECT moneda, SUM(importe) AS total FROM {CONTRATOS} GROUP BY moneda) AS t LIMIT 1",
+            f"SELECT COUNT(*) AS contratos FROM {CONTRATOS} WHERE importe IS NULL LIMIT 1",
+        ):
+            with self.subTest(query=query):
+                validate_sql(query)
+
+
+class CountUnitsTests(unittest.TestCase):
+    """A5, mejora 21: COUNT(*) counts contracts, whatever the column is called."""
+
+    def test_n02_contracts_named_expedientes(self):
+        # casos_nuevos n02 as the model wrote it on 2026-11-23.
+        with self.assertRaisesRegex(SQLValidationError, r"COUNT\(DISTINCT codigo_expediente\)"):
+            validate_sql(
+                f"SELECT tipo_expediente, COUNT(*) AS expedientes FROM {CONTRATOS} "
+                "WHERE fuente = 'historico' AND NOT tipo_expediente IS NULL "
+                "GROUP BY tipo_expediente ORDER BY expedientes DESC, tipo_expediente LIMIT 200"
+            )
+
+    def test_other_units(self):
+        for alias, column in (
+            ("num_proveedores", "proveedor_normalizado"),
+            ("total_instituciones", "institucion"),
+            ("expediente", "codigo_expediente"),
+        ):
+            with self.subTest(alias=alias):
+                with self.assertRaisesRegex(SQLValidationError, rf"COUNT\(DISTINCT {column}\)"):
+                    validate_sql(f"SELECT COUNT(*) AS {alias} FROM {CONTRATOS} WHERE fuente = 'comprasmx' LIMIT 1")
+
+    def test_counts_of_contracts_and_distinct_counts_pass(self):
+        for query in (
+            f"SELECT tipo_expediente, COUNT(*) AS contratos FROM {CONTRATOS} GROUP BY tipo_expediente LIMIT 200",
+            f"SELECT codigo_expediente, COUNT(*) AS contratos_por_expediente FROM {CONTRATOS} GROUP BY codigo_expediente LIMIT 200",
+            f"SELECT proveedor_normalizado, COUNT(*) AS registros_proveedor FROM {CONTRATOS} GROUP BY proveedor_normalizado LIMIT 200",
+            f"SELECT fuente, COUNT(*) AS sin_proveedor FROM {CONTRATOS} WHERE proveedor_normalizado IS NULL GROUP BY fuente LIMIT 5",
+            f"SELECT COUNT(DISTINCT codigo_expediente) AS expedientes FROM {CONTRATOS} LIMIT 1",
+            f"SELECT COUNT(*) AS proveedores FROM (SELECT DISTINCT proveedor_normalizado FROM {CONTRATOS}) AS t LIMIT 1",
+            f"SELECT COUNT(*) AS coincidencias FROM {COINCIDENCIAS} LIMIT 1",
+        ):
+            with self.subTest(query=query):
+                validate_sql(query)
 
 
 if __name__ == "__main__":

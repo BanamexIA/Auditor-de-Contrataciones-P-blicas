@@ -48,8 +48,10 @@ def sql_answer(sql, supuestos=()):
     return json.dumps({"tipo": "sql", "sql": sql, "filtros": [], "supuestos": list(supuestos)})
 
 
-def ask(client, question="¿Cuántos contratos hay?", clarifications=(), execute=None):
-    return answer_question(question, client, "sistema", COVERAGE, clarifications, execute=execute)
+def ask(client, question="¿Cuántos contratos hay?", clarifications=(), execute=None, count_records=False):
+    # The count queries are tested in CountTests; elsewhere they would use up the executor's outcomes.
+    return answer_question(question, client, "sistema", COVERAGE, clarifications, execute=execute,
+                           count_records=count_records)
 
 
 ROWS = [{"fuente": "comprasmx", "contratos": 84676}]
@@ -342,3 +344,50 @@ class ContradictedNoDataRetryTests(unittest.TestCase):
         result = ask(FakeClient(answer))
         self.assertEqual(result["tipo"], "sin_datos")
         self.assertEqual(result["intentos_fallidos"], [])
+
+
+class CountTests(unittest.TestCase):
+    """HU-01 (A6): the answer says how many records back it and whether the LIMIT cut it."""
+
+    LIST_SQL = (
+        "SELECT codigo_contrato, fecha_inicio FROM clean.v_contratos_agente "
+        "WHERE fuente = 'comprasmx' ORDER BY fecha_inicio DESC, codigo_contrato LIMIT 2"
+    )
+
+    def test_an_aggregate_reports_the_records_behind_it(self):
+        execute = FakeExecutor(ROWS, [{"registros": 84676}])
+        result = ask(FakeClient(sql_answer(VALID_SQL)), execute=execute, count_records=True)
+        self.assertEqual(
+            result["conteo"], {"filas": 1, "filas_totales": 1, "truncado": False, "registros": 84676}
+        )
+        self.assertEqual(len(execute.queries), 2)
+        self.assertIn("AS registros", execute.queries[1])
+
+    def test_a_list_cut_by_the_limit_says_so(self):
+        rows = [{"codigo_contrato": "C-1", "fecha_inicio": None}, {"codigo_contrato": "C-2", "fecha_inicio": None}]
+        execute = FakeExecutor(rows, [{"filas_totales": 592}])
+        result = ask(FakeClient(sql_answer(self.LIST_SQL)), execute=execute, count_records=True)
+        self.assertEqual(
+            result["conteo"], {"filas": 2, "filas_totales": 592, "truncado": True, "registros": 592}
+        )
+        self.assertIn("se muestran 2 de 592 filas por el LIMIT", result["supuestos"][-1])
+
+    def test_a_list_below_the_limit_needs_no_extra_query(self):
+        rows = [{"codigo_contrato": "C-1", "fecha_inicio": None}]
+        execute = FakeExecutor(rows)
+        result = ask(FakeClient(sql_answer(self.LIST_SQL)), execute=execute, count_records=True)
+        self.assertEqual(result["conteo"], {"filas": 1, "filas_totales": 1, "truncado": False, "registros": 1})
+        self.assertEqual(len(execute.queries), 1)
+
+    def test_a_failed_count_keeps_the_answer(self):
+        execute = FakeExecutor(ROWS, pg_errors.QueryCanceled("canceling statement due to statement timeout"))
+        result = ask(FakeClient(sql_answer(VALID_SQL)), execute=execute, count_records=True)
+        self.assertEqual(result["tipo"], "sql")
+        self.assertEqual(result["filas"], ROWS)
+        self.assertEqual(
+            result["conteo"], {"filas": 1, "filas_totales": None, "truncado": None, "registros": None}
+        )
+
+    def test_without_execute_there_is_no_count(self):
+        result = ask(FakeClient(sql_answer(VALID_SQL)), count_records=True)
+        self.assertNotIn("conteo", result)

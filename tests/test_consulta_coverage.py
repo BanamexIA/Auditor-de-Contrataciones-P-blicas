@@ -263,3 +263,61 @@ class ContradictedNoDataTests(unittest.TestCase):
         ):
             with self.subTest(motivo=reason):
                 self.assertIsNone(contradicted_no_data(reason, COVERAGE))
+
+
+class GroupByYearNotesTests(unittest.TestCase):
+    """A5, mejora 20: a result split by year also warns about the incomplete years."""
+
+    HISTORICO_NOTE = "Cobertura incompleta en CompraNet histórico para 2010 y 2023–2024."
+
+    def test_n06_as_the_model_wrote_it(self):
+        # casos_nuevos n06 on 2026-11-23: 2010 was a row of the result and had no note.
+        sql = (
+            "SELECT CAST(EXTRACT(YEAR FROM fecha_inicio) AS INT) AS año_inicio, COUNT(*) AS contratos "
+            f"FROM {V} AS c JOIN clean.v_coincidencias_69b_agente AS m ON m.codigo_contrato = c.codigo_contrato "
+            "WHERE m.requiere_revision_humana AND c.fecha_inicio_valida "
+            "GROUP BY año_inicio ORDER BY año_inicio LIMIT 200"
+        )
+        check = check_coverage(sql, COVERAGE)
+        self.assertIsNone(check.sin_datos)
+        self.assertEqual(check.supuestos, [self.HISTORICO_NOTE])
+
+    def test_group_by_the_expression_or_its_position(self):
+        for group in ("EXTRACT(YEAR FROM fecha_inicio)", "1"):
+            with self.subTest(group=group):
+                sql = (
+                    f"SELECT EXTRACT(YEAR FROM fecha_inicio) AS anio, COUNT(*) AS contratos FROM {V} "
+                    f"WHERE fuente = 'historico' GROUP BY {group} ORDER BY 1 LIMIT 50"
+                )
+                self.assertEqual(check_coverage(sql, COVERAGE).supuestos, [self.HISTORICO_NOTE])
+
+    def test_group_by_month(self):
+        sql = (
+            f"SELECT DATE_TRUNC('month', fecha_inicio) AS mes, COUNT(*) AS contratos FROM {V} "
+            "WHERE fuente = 'historico' GROUP BY mes ORDER BY mes LIMIT 500"
+        )
+        self.assertEqual(check_coverage(sql, COVERAGE).supuestos, [self.HISTORICO_NOTE])
+
+    def test_comprasmx_by_year_has_no_incomplete_year(self):
+        sql = (
+            f"SELECT EXTRACT(YEAR FROM fecha_inicio) AS anio, COUNT(*) AS contratos FROM {V} "
+            "WHERE fuente = 'comprasmx' GROUP BY anio ORDER BY anio LIMIT 50"
+        )
+        self.assertEqual(check_coverage(sql, COVERAGE).supuestos, [])
+
+    def test_other_groupings_still_have_no_notes(self):
+        for group in ("fuente", "moneda"):
+            with self.subTest(group=group):
+                sql = f"SELECT {group}, COUNT(*) AS contratos FROM {V} GROUP BY {group} LIMIT 50"
+                self.assertEqual(check_coverage(sql, COVERAGE).supuestos, [])
+
+    def test_a_year_filter_keeps_a_single_note(self):
+        sql = (
+            f"SELECT EXTRACT(YEAR FROM fecha_inicio) AS anio, COUNT(*) AS contratos FROM {V} "
+            "WHERE fuente = 'historico' AND fecha_inicio >= DATE '2023-01-01' "
+            "AND fecha_inicio < DATE '2025-01-01' GROUP BY anio LIMIT 50"
+        )
+        self.assertEqual(
+            check_coverage(sql, COVERAGE).supuestos,
+            ["Cobertura incompleta en CompraNet histórico para 2023–2024."],
+        )

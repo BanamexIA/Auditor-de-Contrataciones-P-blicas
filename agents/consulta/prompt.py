@@ -4,11 +4,13 @@ import json
 import re
 from typing import Any, Sequence
 
+from agents.consulta.agencies import uppercase_agency_literals
 from agents.consulta.concepts import MISSING_CONCEPTS
 from agents.consulta.providers import add_suffix_variants, normalize_provider_literals
 from agents.consulta.validator import (
     MAX_SQL_ROWS,
     add_missing_limit,
+    adds_amounts,
     add_order_tiebreaker,
     fix_alias_typos,
     validate_sql,
@@ -35,17 +37,32 @@ SUFFIX_NOTE = (
 )
 
 
+CURRENCY_NOTE = (
+    "El importe es el registrado en la moneda de cada contrato y no se convierte a pesos; "
+    "por eso se suma por moneda."
+)
+AGENCY_NOTE_PREFIX = "La dependencia se buscó en mayúsculas, como está en la base: "
+
+
+def agency_note(name: str) -> str:
+    """A5, mejora 26: says that an agency name was searched in upper case."""
+    return f"{AGENCY_NOTE_PREFIX}'{name}'."
+
+
 def is_system_note(text: str) -> bool:
     """Notes written by code, which the coverage filter must keep even if a name contains "completo"."""
-    return text in (LIMIT_ADDED_NOTE, SUFFIX_NOTE) or text.startswith(PROVIDER_NOTE_PREFIX)
+    return text in (LIMIT_ADDED_NOTE, SUFFIX_NOTE, CURRENCY_NOTE) or text.startswith(
+        (PROVIDER_NOTE_PREFIX, AGENCY_NOTE_PREFIX)
+    )
 
 # Rules distilled from docs/capa_semantica.md; keep both in sync.
 DATA_RULES = """Reglas de los datos:
 - fuente = 'comprasmx' es ComprasMX 2026. fuente = 'historico' es CompraNet histórico, con inicios válidos de 2010 a 2024; 2010, 2023 y 2024 están incompletos. No hay contratos con inicio en 2025.
 - institucion, nombre_de_la_uc, descripcion_ramo y articulo_de_excepcion solo existen en ComprasMX. En el histórico son nulos: eso no significa cero actividad.
 - Un periodo se filtra con un rango semiabierto de fecha_inicio, por ejemplo fecha_inicio >= DATE '2024-01-01' AND fecha_inicio < DATE '2025-01-01'. Para agrupar por año usa EXTRACT(YEAR FROM fecha_inicio)::integer y filtra fecha_inicio_valida.
-- Cada fila de clean.v_contratos_agente es un registro de contrato: cuenta con COUNT(*).
+- Cada fila de clean.v_contratos_agente es un contrato: COUNT(*) cuenta contratos. Un expediente puede tener varios contratos: para contar expedientes usa COUNT(DISTINCT codigo_expediente).
 - importe se suma por fuente y por moneda. Es importe registrado, no gasto pagado.
+- «Nulo», «sin dato» o «sin registrar» es IS NULL, no cero: importe IS NULL es un contrato sin importe registrado e importe = 0 es un importe en cero. Si eliges una lectura que la pregunta no deja clara, dila en supuestos.
 - tipo_procedimiento_norm es una clasificación preliminar con los valores adjudicacion_directa, invitacion_tres_personas, licitacion_publica, otro y sin_dato.
 - Los porcentajes se calculan desde conteos, con NULLIF en el denominador. Nunca sumes ni promedies porcentajes.
 - clean.v_coincidencias_69b_agente tiene una fila por contrato, no por empresa. Al unirla con clean.v_contratos_agente por codigo_contrato, cuenta COUNT(DISTINCT codigo_contrato). nivel_confianza 'alta' es RFC exacto y 'media' es solo nombre. La vista no tiene la situación del contribuyente: no la afirmes.
@@ -63,7 +80,7 @@ SQL_RULES = f"""- Nunca uses SELECT * ni alias.*: escribe cada columna que devue
 - Si piden una lista de contratos («lista contratos…», «muestra contratos…», «¿qué contratos…?»), devuelve una fila por contrato con codigo_contrato, fuente y las columnas de cada dato que la pregunta menciona: si habla de fechas o importes, devuelve esas columnas. En una lista no uses GROUP BY ni funciones de agregación.
 - {", ".join(BOOLEAN_COLUMNS)} son verdadero o falso: úsalas solas en WHERE (por ejemplo WHERE m.rfc_exacto) o con NOT, nunca comparadas con texto como 'S' o 'si'. fecha_inicio_estado es otra cosa: el estado de la fecha (valida, nula, fuera_de_rango o no_parseable); si preguntan por el estado de la fecha de inicio, usa esa columna.
 - Para buscar un proveedor (la empresa o persona que vende), filtra clean.v_contratos_agente con proveedor_normalizado = '<nombre como lo dice la pregunta>'; el sistema lo pasa a la forma normalizada. nombre_de_la_uc es la unidad compradora, quien compra, no el proveedor. No unas la vista del 69-B ni agregues filtros que la pregunta no pide.
-- Pon en WHERE todas las condiciones de la pregunta: fuente, periodo, tipo de procedimiento, institución, coincidencia con el 69-B. Si nombra un tipo de procedimiento, filtra tipo_procedimiento_norm con su valor.
+- Pon en WHERE todas las condiciones de la pregunta: fuente, periodo, tipo de procedimiento, institución, coincidencia con el 69-B. Si nombra un tipo de procedimiento, filtra tipo_procedimiento_norm con su valor. No agregues condiciones que la pregunta no pide, como un tope de fechas; la excepción es fecha_inicio_valida cuando usas fecha_inicio.
 - "Preliminar" describe toda la clasificación de tipo_procedimiento_norm, no es un filtro: no filtres por tipo_procedimiento_estado salvo que la pregunta pida un estado de validación.
 - rfc_exacto, nivel_confianza, requiere_revision_humana, rfc y nombre_del_contribuyente solo están en clean.v_coincidencias_69b_agente. Si la pregunta habla del 69-B y necesitas esas columnas junto con datos del contrato, une las vistas: FROM clean.v_contratos_agente AS c JOIN clean.v_coincidencias_69b_agente AS m ON m.codigo_contrato = c.codigo_contrato. Si no habla del 69-B, no las unas."""
 
@@ -237,15 +254,21 @@ def parse_response(text: str) -> dict[str, Any]:
         sql, _ = add_order_tiebreaker(sql)
         sql, providers = normalize_provider_literals(sql)
         sql, searched = add_suffix_variants(sql)
+        sql, agencies = uppercase_agency_literals(sql)
         supuestos = _text_list(payload, "supuestos")
         if limit_added:
             supuestos.append(LIMIT_ADDED_NOTE)
         supuestos.extend(provider_note(name) for name in dict.fromkeys(providers))
+        supuestos.extend(agency_note(name) for name in agencies)
         if searched:
             supuestos.append(SUFFIX_NOTE)
+        safe_sql = validate_sql(sql)
+        if adds_amounts(safe_sql):
+            # A5, mejora 25: HU-01 asks to say that currencies are kept apart.
+            supuestos.append(CURRENCY_NOTE)
         return {
             "tipo": "sql",
-            "sql": validate_sql(sql),
+            "sql": safe_sql,
             "filtros": _text_list(payload, "filtros"),
             "supuestos": supuestos,
         }

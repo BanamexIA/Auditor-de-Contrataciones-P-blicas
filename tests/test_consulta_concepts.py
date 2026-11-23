@@ -63,9 +63,10 @@ class MissingConceptTests(unittest.TestCase):
 
     def test_no_reference_question_with_data_is_caught(self):
         questions = []
-        for name in ("golden_set.yaml", "casos_consulta.yaml", "casos_empresa.yaml", "casos_empresa_69b.yaml", "examples.yaml"):
+        for name in ("golden_set.yaml", "casos_consulta.yaml", "casos_empresa.yaml", "casos_empresa_69b.yaml",
+                     "casos_nuevos.yaml", "examples.yaml"):
             for case in yaml.safe_load((ROOT / "eval" / name).read_text(encoding="utf-8")):
-                if case.get("id") not in ("c10", "f04"):
+                if case.get("id") not in ("c10", "f04", "n08"):
                     questions.append(case["pregunta"])
         questions += ["¿Cuánto se gastó en adjudicaciones directas?", "Muestra la página 2 de resultados."]
         for question in questions:

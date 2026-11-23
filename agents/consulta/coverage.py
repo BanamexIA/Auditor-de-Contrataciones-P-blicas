@@ -202,6 +202,35 @@ def _start_trunc_unit(node: exp.Expression) -> str | None:
     return name if name in ("YEAR", "MONTH") else None
 
 
+def _is_start_period(node: exp.Expression) -> bool:
+    return _is_start_year(node) or _start_trunc_unit(node) is not None
+
+
+def _group_target(item: exp.Expression, projections: list[exp.Expression]) -> exp.Expression:
+    """GROUP BY 1 or GROUP BY an output alias stands for that projection's expression."""
+    node = _unwrap(item)
+    if isinstance(node, exp.Literal) and not node.is_string:
+        position = _int_value(node)
+        if position is not None and 1 <= position <= len(projections):
+            return projections[position - 1].unalias()
+    elif isinstance(node, exp.Column) and not node.table:
+        for projection in projections:
+            if isinstance(projection, exp.Alias) and projection.alias.lower() == node.name.lower():
+                return projection.this
+    return item
+
+
+def _groups_by_start_period(tree: exp.Expression) -> bool:
+    """True if some SELECT groups by the start year or month (A5, mejora 20)."""
+    for select in tree.find_all(exp.Select):
+        group = select.args.get("group")
+        if group is None:
+            continue
+        if any(_is_start_period(_group_target(item, select.expressions)) for item in group.expressions):
+            return True
+    return False
+
+
 def _next_period(day: date, unit: str) -> date:
     if unit == "YEAR":
         return date(day.year + 1, 1, 1)
@@ -391,6 +420,9 @@ def check_coverage(sql: str, coverage: Coverage) -> CoverageCheck:
                 f"Sin datos para {format_years(missing)}; el resultado solo incluye "
                 f"{format_years(covered_years)}."
             )
+    # A5, mejora 20: a result split by year shows the incomplete years as rows, even
+    # when the WHERE does not name them (n06 of casos_nuevos showed 2010 without a note).
+    if filters.period_restricted or _groups_by_start_period(tree):
         for source in sorted(effective):
             partial = covered[source] & coverage.partial_years.get(source, frozenset())
             if partial:

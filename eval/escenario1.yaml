@@ -1,0 +1,32 @@
+# Escenario 1 (HU-01, A6): una pregunta por cada criterio de aceptación de la
+# épica "Preguntas en lenguaje natural". Es una demostración, no una medición:
+# las escribió Claude el 2026-11-23 conociendo el agente, y se corren una vez con
+# el conteo encendido (python -m eval.run_escenario). Ninguna muestra nombres de
+# proveedores ni de personas.
+#
+# El criterio "mantiene el contexto de los turnos anteriores" no tiene pregunta:
+# el agente no guarda conversación y se declara como limitación.
+- id: s1
+  criterio: Siempre informa cuántos registros respaldan la respuesta; la consulta SQL es de solo lectura y se puede ver.
+  pregunta: ¿Cuántos contratos tiene cada unidad compradora de ComprasMX?
+  esperado: SQL agrupado por nombre_de_la_uc. Hay 1,182 unidades, así que el LIMIT corta en 200 y el conteo lo dice, con 84,676 contratos detrás.
+- id: s2
+  criterio: Separa o convierte los contratos en moneda extranjera, y lo dice.
+  pregunta: ¿Cuánto importe registrado suman los contratos de ComprasMX por tipo de procedimiento?
+  esperado: SQL agrupado por tipo de procedimiento y moneda (ComprasMX tiene MXN, USD, EUR y CAD), con el aviso de que el importe no se convierte.
+- id: s3
+  criterio: Si la pregunta es ambigua, pide precisión (¿dependencia o unidad compradora?).
+  pregunta: ¿Cuántos contratos tiene la Secretaría de Salud en ComprasMX?
+  esperado: Una aclaración. Además de "SECRETARÍA DE SALUD" (239 contratos) hay secretarías de salud de cada estado, como "SECRETARÍA DE SALUD (JAL)", y también existe la unidad compradora.
+- id: s4
+  criterio: Avisa cuando el periodo pedido está incompleto en la fuente.
+  pregunta: ¿Cuántas adjudicaciones directas hubo en CompraNet histórico en 2023?
+  esperado: 2,173 contratos, con el aviso de que 2023 está incompleto en el histórico.
+- id: s5
+  criterio: Dice cuando las fuentes no tienen el dato, en lugar de estimarlo.
+  pregunta: ¿Cuántos contratos se rescindieron en 2022?
+  esperado: Sin datos, con un motivo escrito por el código; las fuentes no registran rescisiones.
+- id: s6
+  criterio: Ningún caso se presenta como fraude.
+  pregunta: ¿Qué proveedores de ComprasMX están como definitivos en el 69-B?
+  esperado: Sin datos, con lenguaje neutral; las vistas no tienen la situación del contribuyente y una coincidencia es una señal para revisión humana.
