@@ -1,0 +1,30 @@
+{
+  "metadata": {
+    "archivo": "casos_empresa.yaml",
+    "modelo": "qwen2.5:7b",
+    "casos": 6,
+    "repeticiones": 1,
+    "fecha": "2026-11-23T11:44:07",
+    "comparacion": "filas normalizadas; ignora alias, orden de columnas y orden de filas"
+  },
+  "resumen": {
+    "respuestas": 6,
+    "exactitud_sql_pct": 60.0,
+    "acierto_global_pct": 66.7,
+    "por_dificultad": {
+      "dificil": 100.0,
+      "facil": 100.0,
+      "media": 33.3
+    },
+    "por_tipo_esperado": {
+      "sin_datos": 100.0,
+      "sql": 60.0
+    },
+    "errores": {
+      "columnas_distintas": 1,
+      "filas_distintas": 1
+    },
+    "consistencia": null,
+    "esperados_vacios": []
+  }
+}

@@ -200,6 +200,20 @@ def enlace_reporte(caso_id: str, version: int):
 
 @bp.get("/casos/<caso_id>/reportes/<int:version>/archivo")
 def archivo_reporte(caso_id: str, version: int):
+    return _entregar_reporte(caso_id, version, redirigir=True)
+
+
+@bp.get("/casos/<caso_id>/reportes/<int:version>/contenido")
+def contenido_reporte(caso_id: str, version: int):
+    """Los bytes del reporte siempre a través del backend (sin redirigir a S3).
+
+    Para visores que leen el PDF con fetch (pdf.js): el navegador no puede leer S3 directo
+    sin CORS en el bucket. Se verifica el SHA-256 antes de entregarlo.
+    """
+    return _entregar_reporte(caso_id, version, redirigir=False)
+
+
+def _entregar_reporte(caso_id: str, version: int, redirigir: bool):
     try:
         reporte = _repo().obtener_reporte(caso_id, version)
     except ReporteNoEncontrado:
@@ -207,7 +221,7 @@ def archivo_reporte(caso_id: str, version: int):
                       f"No existe la versión {version} del reporte del caso {caso_id}.")
     almacen = current_app.extensions["almacen_reportes"]
     try:
-        url = almacen.url_descarga(reporte["uri"])
+        url = almacen.url_descarga(reporte["uri"]) if redirigir else None
         if url:
             return redirect(url, code=302)
         contenido = leer_reporte(almacen, reporte)

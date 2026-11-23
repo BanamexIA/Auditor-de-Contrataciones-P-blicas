@@ -7,6 +7,7 @@ model, and compares results ignoring column aliases and column order.
 
     python -m eval.run_consulta --repeticiones 3
     python -m eval.run_consulta --casos eval/casos_consulta.yaml
+    python -m eval.run_consulta --casos eval/casos_empresa.yaml
 """
 from __future__ import annotations
 
@@ -94,6 +95,10 @@ def evaluate(case: dict[str, Any], answer: dict[str, Any], expected_rows=None, a
         "error": error,
         "detalle_error": execution_error or answer.get("motivo"),
         "intentos": answer.get("intentos"),
+        # A5, mejora 9: why each failed attempt was rejected (q13 needed two and we did not know why).
+        "errores_intentos": " | ".join(
+            f"{item['intento']} {item['etapa']}: {item['error']}" for item in answer.get("intentos_fallidos", [])
+        ),
         "sql": answer.get("sql") or answer.get("sql_descartado") or answer.get("sql_rechazado"),
         "supuestos": answer.get("supuestos", []),
         "filas_esperadas": len(expected_rows) if expected_rows is not None else None,
@@ -119,6 +124,30 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
             for kind in sorted({row["tipo_esperado"] for row in results})
         },
         "errores": dict(Counter(row["error"] for row in results if row["error"])),
+        "consistencia": consistency(results),
+        # A5, mejora 8: an empty expected result lets any wrong SQL without rows count as right.
+        "esperados_vacios": sorted({
+            row["id"] for row in results if row["tipo_esperado"] == "sql" and row["filas_esperadas"] == 0
+        }),
+    }
+
+
+def consistency(results: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Cases that gave the same SQL and the same verdict in every repetition (A5, mejora 9)."""
+    by_case: dict[str, list[dict[str, Any]]] = {}
+    for row in results:
+        by_case.setdefault(row["id"], []).append(row)
+    if all(len(rows) < 2 for rows in by_case.values()):
+        return None
+    varying = sorted(
+        case_id for case_id, rows in by_case.items()
+        if len({(row["sql"], row["correcto"], row["error"]) for row in rows}) > 1
+    )
+    return {
+        "casos": len(by_case),
+        "consistentes": len(by_case) - len(varying),
+        "pct": round(100 * (len(by_case) - len(varying)) / len(by_case), 1),
+        "casos_que_variaron": varying,
     }
 
 
@@ -145,6 +174,20 @@ def write_report(output_dir: Path, results: list[dict[str, Any]], summary: dict[
     ]
     lines += [f"| Exactitud SQL, dificultad {level} | {value} % |" for level, value in summary["por_dificultad"].items()]
     lines += [f"| Acierto en casos `{kind}` | {value} % |" for kind, value in summary["por_tipo_esperado"].items()]
+    same = summary.get("consistencia")
+    if same:
+        lines.append(
+            f"| Consistencia entre repeticiones (mismo SQL y mismo veredicto) | "
+            f"{same['consistentes']} de {same['casos']} casos ({same['pct']} %) |"
+        )
+    if same and same["casos_que_variaron"]:
+        lines += ["", f"Casos que variaron entre repeticiones: {', '.join(same['casos_que_variaron'])}."]
+    if summary.get("esperados_vacios"):
+        lines += [
+            "",
+            f"> **Aviso:** {', '.join(summary['esperados_vacios'])} tienen un resultado esperado vacío: "
+            "cualquier SQL que no devuelva filas cuenta como acierto. Cambia esos casos.",
+        ]
     lines += ["", "## Tipos de error", "", "| Error | Respuestas |", "|---|---:|"]
     lines += [f"| {error} | {count} |" for error, count in sorted(summary["errores"].items())] or ["| — | 0 |"]
     lines += ["", "## Respuestas incorrectas", "", "| Caso | Esperado | Obtenido | Error |", "|---|---|---|---|"]
@@ -197,7 +240,10 @@ def run(model: str | None, repetitions: int, output_root: Path, cases_path: Path
     }
 
     def answer_fn(question: str) -> dict[str, Any]:
-        return answer_question(question, client, system_prompt, coverage, execute=execute_read_only)
+        # The count (HU-01) changes neither the SQL nor the verdict; it stays off so the
+        # time per question remains comparable with A4 and A5.
+        return answer_question(question, client, system_prompt, coverage, execute=execute_read_only,
+                               count_records=False)
 
     results = []
     for repetition in range(1, repetitions + 1):

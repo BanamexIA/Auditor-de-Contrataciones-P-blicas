@@ -3,7 +3,7 @@ from pathlib import Path
 
 import yaml
 
-from agents.consulta.coverage import COVERAGE_QUERY, Coverage, check_coverage, format_years
+from agents.consulta.coverage import COVERAGE_QUERY, Coverage, check_coverage, contradicted_no_data, format_years
 from agents.consulta.prompt import BUILT_IN_EXAMPLES
 from agents.consulta.validator import validate_sql
 
@@ -77,6 +77,11 @@ class NoDataTests(unittest.TestCase):
 
     def test_between_dates(self):
         self.assert_no_data(count_sql("fecha_inicio BETWEEN '2025-01-01' AND '2025-12-31'"), "2025")
+
+    def test_year_filter_written_with_date_trunc(self):
+        # A5, mejora 6: the model wrote c12 this way on 2026-11-19.
+        self.assert_no_data(count_sql("DATE_TRUNC('YEAR', fecha_inicio) = CAST('2025-01-01' AS DATE)"), "2025")
+        self.assert_no_data(count_sql("date_trunc('month', fecha_inicio) = DATE '2025-03-01'"), "2025")
 
     def test_year_outside_the_requested_source(self):
         self.assert_no_data(
@@ -203,5 +208,116 @@ class ReferenceCasesTests(unittest.TestCase):
                 self.assertEqual("sql_esperado" in case, case["tipo_esperado"] == "sql")
 
 
+class DateTruncNotesTests(unittest.TestCase):
+    """A5, mejora 6: the partial-year note no longer depends on the model writing it."""
+
+    def test_partial_year_note_for_date_trunc_by_year(self):
+        # c12 as the model wrote it on 2026-11-19; the note was missing.
+        sql = count_sql(
+            "fuente = 'historico' AND fecha_inicio_valida "
+            "AND DATE_TRUNC('YEAR', fecha_inicio) = CAST('2024-01-01' AS DATE)"
+        )
+        check = check_coverage(sql, COVERAGE)
+        self.assertIsNone(check.sin_datos)
+        self.assertEqual(check.supuestos, ["Cobertura incompleta en CompraNet histórico para 2024."])
+
+    def test_a_december_month_ends_at_the_next_year(self):
+        sql = count_sql("fuente = 'historico' AND DATE_TRUNC('month', fecha_inicio) = DATE '2023-12-01'")
+        self.assertEqual(check_coverage(sql, COVERAGE).supuestos, ["Cobertura incompleta en CompraNet histórico para 2023."])
+
+    def test_other_units_are_not_read_as_a_period(self):
+        sql = count_sql("DATE_TRUNC('day', fecha_inicio) = DATE '2025-03-01'")
+        self.assertIsNone(check_coverage(sql, COVERAGE).sin_datos)
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class ContradictedNoDataTests(unittest.TestCase):
+    """A5, mejora 17: a "no data" reason that names years with contracts."""
+
+    def test_q17_reason_is_contradicted_with_the_partial_year(self):
+        self.assertEqual(
+            contradicted_no_data("El histórico de CompraNet no registra contratos con inicio en 2024.", COVERAGE),
+            "CompraNet histórico sí tiene contratos con inicio en 2024 (2024 incompleto)",
+        )
+
+    def test_a_year_without_data_is_not_contradicted(self):
+        for reason in (
+            "No hay contratos con inicio en 2025.",
+            "No hay datos de 2024 ni de 2025.",
+            "ComprasMX no tiene contratos de 2024.",
+        ):
+            with self.subTest(motivo=reason):
+                self.assertIsNone(contradicted_no_data(reason, COVERAGE))
+
+    def test_a_year_with_data_in_any_source_when_none_is_named(self):
+        message = contradicted_no_data("No hay registros de 2026.", COVERAGE)
+        self.assertEqual(message, "ComprasMX sí tiene contratos con inicio en 2026")
+
+    def test_reasons_that_are_not_about_missing_years_are_left_alone(self):
+        for reason in (
+            "Las fuentes no registran pagos ni fechas de pago.",
+            "El importe de 2024 no es gasto pagado.",
+        ):
+            with self.subTest(motivo=reason):
+                self.assertIsNone(contradicted_no_data(reason, COVERAGE))
+
+
+class GroupByYearNotesTests(unittest.TestCase):
+    """A5, mejora 20: a result split by year also warns about the incomplete years."""
+
+    HISTORICO_NOTE = "Cobertura incompleta en CompraNet histórico para 2010 y 2023–2024."
+
+    def test_n06_as_the_model_wrote_it(self):
+        # casos_nuevos n06 on 2026-11-23: 2010 was a row of the result and had no note.
+        sql = (
+            "SELECT CAST(EXTRACT(YEAR FROM fecha_inicio) AS INT) AS año_inicio, COUNT(*) AS contratos "
+            f"FROM {V} AS c JOIN clean.v_coincidencias_69b_agente AS m ON m.codigo_contrato = c.codigo_contrato "
+            "WHERE m.requiere_revision_humana AND c.fecha_inicio_valida "
+            "GROUP BY año_inicio ORDER BY año_inicio LIMIT 200"
+        )
+        check = check_coverage(sql, COVERAGE)
+        self.assertIsNone(check.sin_datos)
+        self.assertEqual(check.supuestos, [self.HISTORICO_NOTE])
+
+    def test_group_by_the_expression_or_its_position(self):
+        for group in ("EXTRACT(YEAR FROM fecha_inicio)", "1"):
+            with self.subTest(group=group):
+                sql = (
+                    f"SELECT EXTRACT(YEAR FROM fecha_inicio) AS anio, COUNT(*) AS contratos FROM {V} "
+                    f"WHERE fuente = 'historico' GROUP BY {group} ORDER BY 1 LIMIT 50"
+                )
+                self.assertEqual(check_coverage(sql, COVERAGE).supuestos, [self.HISTORICO_NOTE])
+
+    def test_group_by_month(self):
+        sql = (
+            f"SELECT DATE_TRUNC('month', fecha_inicio) AS mes, COUNT(*) AS contratos FROM {V} "
+            "WHERE fuente = 'historico' GROUP BY mes ORDER BY mes LIMIT 500"
+        )
+        self.assertEqual(check_coverage(sql, COVERAGE).supuestos, [self.HISTORICO_NOTE])
+
+    def test_comprasmx_by_year_has_no_incomplete_year(self):
+        sql = (
+            f"SELECT EXTRACT(YEAR FROM fecha_inicio) AS anio, COUNT(*) AS contratos FROM {V} "
+            "WHERE fuente = 'comprasmx' GROUP BY anio ORDER BY anio LIMIT 50"
+        )
+        self.assertEqual(check_coverage(sql, COVERAGE).supuestos, [])
+
+    def test_other_groupings_still_have_no_notes(self):
+        for group in ("fuente", "moneda"):
+            with self.subTest(group=group):
+                sql = f"SELECT {group}, COUNT(*) AS contratos FROM {V} GROUP BY {group} LIMIT 50"
+                self.assertEqual(check_coverage(sql, COVERAGE).supuestos, [])
+
+    def test_a_year_filter_keeps_a_single_note(self):
+        sql = (
+            f"SELECT EXTRACT(YEAR FROM fecha_inicio) AS anio, COUNT(*) AS contratos FROM {V} "
+            "WHERE fuente = 'historico' AND fecha_inicio >= DATE '2023-01-01' "
+            "AND fecha_inicio < DATE '2025-01-01' GROUP BY anio LIMIT 50"
+        )
+        self.assertEqual(
+            check_coverage(sql, COVERAGE).supuestos,
+            ["Cobertura incompleta en CompraNet histórico para 2023–2024."],
+        )

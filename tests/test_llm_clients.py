@@ -4,7 +4,19 @@ from unittest.mock import patch
 
 from llm.base import LLMResponse
 from llm.cloud_client import CloudClient
-from llm.ollama_client import OllamaClient
+from llm.ollama_client import DEFAULT_NUM_CTX, OllamaClient, num_ctx_setting
+
+
+class NumCtxSettingTests(unittest.TestCase):
+    """A5: Ollama's 4096-token default cut the Agente Consulta's prompt without an error."""
+
+    def test_default_fits_the_consulta_prompt(self):
+        self.assertGreaterEqual(DEFAULT_NUM_CTX, 8192)
+
+    def test_env_overrides_and_bad_values_fall_back(self):
+        for value, expected in (("16384", 16384), ("abc", DEFAULT_NUM_CTX), ("0", DEFAULT_NUM_CTX)):
+            with self.subTest(value=value), patch.dict("os.environ", {"OLLAMA_NUM_CTX": value}):
+                self.assertEqual(num_ctx_setting(), expected)
 
 
 class FakeHTTPResponse:
@@ -52,6 +64,7 @@ class OllamaClientTests(unittest.TestCase):
             {"role": "user", "content": "Resume la evidencia."},
         ])
         self.assertEqual(payload["options"]["temperature"], 0.2)
+        self.assertEqual(payload["options"]["num_ctx"], client.num_ctx)
         self.assertIsInstance(result, LLMResponse)
         self.assertEqual((result.text, result.input_tokens, result.output_tokens),
                          ("respuesta local", 12, 4))

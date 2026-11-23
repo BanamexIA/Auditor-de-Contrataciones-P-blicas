@@ -190,6 +190,18 @@ class ApiReportesTest(unittest.TestCase):
         self.assertEqual(respuesta.status_code, 302)
         self.assertIn("firma=x", respuesta.headers["Location"])
 
+    def test_contenido_nunca_redirige(self):
+        """El visor PDF lee los bytes vía backend aunque el almacén sea S3 (sin CORS en el bucket)."""
+        client, caso_id = self.cliente(AlmacenEnMemoriaTipoS3())
+        guardar_reporte(self.repo, self.almacen, caso_id, PDF, "pdf")
+        r = client.get(f"/casos/{caso_id}/reportes/1/contenido")
+        self.assertEqual((r.status_code, r.data), (200, PDF))
+        self.assertEqual(r.headers["X-Content-SHA256"], hashlib.sha256(PDF).hexdigest())
+        self.almacen.objetos[clave_reporte(caso_id, 1, "pdf")] = b"alterado"
+        r = client.get(f"/casos/{caso_id}/reportes/1/contenido")
+        self.assertEqual(r.get_json()["error"]["codigo"], "reporte_corrupto")
+        self.assertEqual(client.get(f"/casos/{caso_id}/reportes/9/contenido").status_code, 404)
+
     def test_errores(self):
         client, caso_id = self.cliente(AlmacenLocal(self.tmp.name))
         self.assertEqual(client.get("/casos/no-existe/reportes").status_code, 404)

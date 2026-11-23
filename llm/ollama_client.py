@@ -4,6 +4,21 @@ from llm.base import LLMClient, LLMResponse, get_json, post_json, setting, token
 from telemetry.tracking import track_llm_call
 
 
+# Ollama's default context is 4096 tokens, and a longer prompt is cut from the start
+# without an error. The Agente Consulta's system prompt alone is about 4,000 tokens:
+# on 2026-11-23 it reached 4,094 and some retries were cut to about 2,050 (A5).
+DEFAULT_NUM_CTX = 8192
+
+
+def num_ctx_setting() -> int:
+    """Context window sent to Ollama; OLLAMA_NUM_CTX changes it."""
+    try:
+        value = int(setting("OLLAMA_NUM_CTX", "") or DEFAULT_NUM_CTX)
+    except ValueError:
+        return DEFAULT_NUM_CTX
+    return value if value > 0 else DEFAULT_NUM_CTX
+
+
 class OllamaClient(LLMClient):
     provider = "ollama"
 
@@ -13,6 +28,7 @@ class OllamaClient(LLMClient):
             "http://localhost:11434",
         )).rstrip("/")
         self.model = model or setting("AGENT_MODEL", "qwen2.5:7b")
+        self.num_ctx = num_ctx_setting()
         self.model_quantization: str | None = None
         self.ollama_version: str | None = None
         if not self.model.strip():
@@ -50,7 +66,7 @@ class OllamaClient(LLMClient):
                     {"role": "user", "content": prompt},
                 ],
                 "stream": False,
-                "options": {"temperature": temperature},
+                "options": {"temperature": temperature, "num_ctx": self.num_ctx},
             },
         )
         message = payload.get("message")

@@ -1,0 +1,28 @@
+{
+  "metadata": {
+    "archivo": "casos_consulta.yaml",
+    "modelo": "qwen2.5:7b",
+    "casos": 13,
+    "repeticiones": 1,
+    "fecha": "2026-11-23T11:42:46",
+    "comparacion": "filas normalizadas; ignora alias, orden de columnas y orden de filas"
+  },
+  "resumen": {
+    "respuestas": 13,
+    "exactitud_sql_pct": 100.0,
+    "acierto_global_pct": 76.9,
+    "por_dificultad": {
+      "sin_clasificar": 100.0
+    },
+    "por_tipo_esperado": {
+      "aclaracion": 40.0,
+      "sin_datos": 100.0,
+      "sql": 100.0
+    },
+    "errores": {
+      "tipo_incorrecto": 3
+    },
+    "consistencia": null,
+    "esperados_vacios": []
+  }
+}

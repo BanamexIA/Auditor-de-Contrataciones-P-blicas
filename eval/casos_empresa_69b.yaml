@@ -1,0 +1,79 @@
+# Casos de empresa nuevos (A5, 2026-11-19): empresas con coincidencia en el
+# listado 69-B, como pide la demo. Una coincide por RFC (ComprasMX) y otra solo
+# por nombre (histórico). No se usaron para ajustar el prompt: después de la
+# mejora 12, casos_empresa.yaml ya no sirve para medir si el agente generaliza.
+#
+# Las dos son personas morales. Una coincidencia es una señal para revisión
+# humana, no una determinación de irregularidad.
+#
+# Distribuidora Universal Tobosa está en la base como
+# 'DISTRIBUIDORA UNIVERSAL TOBOSA S A DE C V': la regla del ETL quita la
+# puntuación antes que el sufijo, así que "S.A. de C.V." queda como "S A DE C V"
+# (pasa en 420,137 contratos del histórico). Por eso su SQL esperado usa LIKE.
+- id: f01
+  pregunta: ¿Cuántos contratos tiene Grupo Elibza en ComprasMX?
+  dificultad: facil
+  tipo_esperado: sql
+  sql_esperado: |
+    SELECT COUNT(*) AS contratos
+    FROM clean.v_contratos_agente
+    WHERE fuente = 'comprasmx'
+      AND proveedor_normalizado = 'GRUPO ELIBZA'
+    LIMIT 1
+  notas: 16 contratos el 2026-11-19.
+- id: f02
+  pregunta: ¿Cuántos contratos de Grupo Elibza tienen coincidencia con el listado 69-B, por nivel de confianza?
+  dificultad: dificil
+  tipo_esperado: sql
+  sql_esperado: |
+    SELECT m.nivel_confianza, COUNT(DISTINCT c.codigo_contrato) AS contratos
+    FROM clean.v_contratos_agente AS c
+    JOIN clean.v_coincidencias_69b_agente AS m
+      ON m.codigo_contrato = c.codigo_contrato
+    WHERE c.proveedor_normalizado = 'GRUPO ELIBZA'
+    GROUP BY m.nivel_confianza
+    ORDER BY m.nivel_confianza
+    LIMIT 10
+  notas: Coincidencia por RFC (alta) en sus 16 contratos. Es una señal para revisión humana.
+- id: f03
+  pregunta: Lista los contratos de Grupo Elibza con su código, fecha de inicio, importe y moneda.
+  dificultad: media
+  tipo_esperado: sql
+  sql_esperado: |
+    SELECT codigo_contrato, fecha_inicio, importe, moneda
+    FROM clean.v_contratos_agente
+    WHERE proveedor_normalizado = 'GRUPO ELIBZA'
+    ORDER BY fecha_inicio DESC, codigo_contrato
+    LIMIT 200
+  notas: Los 16 contratos; varios comparten fecha, por eso no se piden "los más recientes".
+- id: f04
+  pregunta: ¿Qué situación tiene Grupo Elibza en el listado 69-B?
+  tipo_esperado: sin_datos
+  notas: Las vistas del agente no tienen la situación del contribuyente (presunto, definitivo, desvirtuado o sentencia favorable); no se puede afirmar.
+- id: f05
+  pregunta: ¿Cuántos contratos tuvo Distribuidora Universal Tobosa en CompraNet histórico, por año de inicio?
+  dificultad: media
+  tipo_esperado: sql
+  sql_esperado: |
+    SELECT EXTRACT(YEAR FROM fecha_inicio)::integer AS anio, COUNT(*) AS contratos
+    FROM clean.v_contratos_agente
+    WHERE fuente = 'historico'
+      AND proveedor_normalizado LIKE 'DISTRIBUIDORA UNIVERSAL TOBOSA%'
+      AND fecha_inicio_valida
+    GROUP BY EXTRACT(YEAR FROM fecha_inicio)::integer
+    ORDER BY anio
+    LIMIT 20
+  notas: 15 contratos de 2012 a 2017. Su nombre normalizado conserva "S A DE C V" (ver el encabezado).
+- id: f06
+  pregunta: ¿Cuántos contratos de Distribuidora Universal Tobosa tienen una coincidencia en el listado 69-B que requiere revisión humana?
+  dificultad: dificil
+  tipo_esperado: sql
+  sql_esperado: |
+    SELECT COUNT(DISTINCT c.codigo_contrato) AS contratos
+    FROM clean.v_contratos_agente AS c
+    JOIN clean.v_coincidencias_69b_agente AS m
+      ON m.codigo_contrato = c.codigo_contrato
+    WHERE c.proveedor_normalizado LIKE 'DISTRIBUIDORA UNIVERSAL TOBOSA%'
+      AND m.requiere_revision_humana
+    LIMIT 1
+  notas: Coincidencia solo por nombre (media) en sus 15 contratos del histórico. Señal para revisión humana.

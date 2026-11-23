@@ -1,0 +1,34 @@
+{
+  "metadata": {
+    "archivo": "golden_set.yaml",
+    "modelo": "qwen2.5:7b",
+    "casos": 20,
+    "repeticiones": 3,
+    "fecha": "2026-11-23T11:40:32",
+    "comparacion": "filas normalizadas; ignora alias, orden de columnas y orden de filas"
+  },
+  "resumen": {
+    "respuestas": 60,
+    "exactitud_sql_pct": 93.8,
+    "acierto_global_pct": 95.0,
+    "por_dificultad": {
+      "dificil": 100.0,
+      "facil": 100.0,
+      "media": 88.9
+    },
+    "por_tipo_esperado": {
+      "sin_datos": 100.0,
+      "sql": 93.8
+    },
+    "errores": {
+      "filas_distintas": 3
+    },
+    "consistencia": {
+      "casos": 20,
+      "consistentes": 20,
+      "pct": 100.0,
+      "casos_que_variaron": []
+    },
+    "esperados_vacios": []
+  }
+}
