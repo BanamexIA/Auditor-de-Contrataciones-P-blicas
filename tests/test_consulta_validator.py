@@ -474,6 +474,40 @@ class ProjectQueriesTests(unittest.TestCase):
                 validate_sql(block)
 
 
+class PublishedNameTests(unittest.TestCase):
+    """A5, mejora 24: the published provider name compared with a text."""
+
+    def test_f03_as_the_model_wrote_it(self):
+        # casos_empresa_69b f03 on 2026-11-23: 0 rows instead of 16.
+        with self.assertRaisesRegex(SQLValidationError, "proveedor es el nombre como se publicó.*proveedor_normalizado"):
+            validate_sql(
+                f"SELECT c.codigo_contrato, c.fecha_inicio, c.importe, c.moneda FROM {CONTRATOS} AS c "
+                f"JOIN {COINCIDENCIAS} AS m ON m.codigo_contrato = c.codigo_contrato "
+                "WHERE m.proveedor = 'GRUPO ELIBZA' LIMIT 200"
+            )
+
+    def test_both_views_lists_and_inequalities(self):
+        for condition in (
+            "proveedor = 'BRAND AND PUSH'",
+            "'BRAND AND PUSH' = proveedor",
+            "proveedor <> 'BRAND AND PUSH'",
+            "proveedor IN ('BRAND AND PUSH', 'GRUPO ELIBZA')",
+        ):
+            with self.subTest(condition=condition):
+                with self.assertRaisesRegex(SQLValidationError, "proveedor es el nombre como se publicó"):
+                    validate_sql(f"SELECT COUNT(*) AS contratos FROM {CONTRATOS} WHERE {condition} LIMIT 1")
+
+    def test_normalized_name_patterns_and_projections_pass(self):
+        for query in (
+            f"SELECT COUNT(*) AS contratos FROM {CONTRATOS} WHERE proveedor_normalizado = 'GRUPO ELIBZA' LIMIT 1",
+            f"SELECT COUNT(*) AS contratos FROM {CONTRATOS} WHERE proveedor ILIKE '%ELIBZA%' LIMIT 1",
+            f"SELECT codigo_contrato, proveedor FROM {CONTRATOS} WHERE proveedor IS NULL LIMIT 20",
+            f"SELECT m.proveedor, COUNT(*) AS coincidencias FROM {COINCIDENCIAS} AS m GROUP BY m.proveedor LIMIT 20",
+        ):
+            with self.subTest(query=query):
+                validate_sql(query)
+
+
 class CountUnitsTests(unittest.TestCase):
     """A5, mejora 21: COUNT(*) counts contracts, whatever the column is called."""
 

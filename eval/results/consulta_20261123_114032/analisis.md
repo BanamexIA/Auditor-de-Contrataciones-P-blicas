@@ -77,7 +77,8 @@ así que salieron 0 filas en lugar de 16. El 2026-11-20 y en la corrida de las
 - **Las reglas en código no tienen ese problema**: solo actúan cuando aparece el
   patrón. La mejora 21 no rechazó ninguna de las 300 respuestas pasadas salvo el
   n02 que estaba mal.
-- **Candidata para f03 (mejora 24, no aplicada):** que el validador rechace
-  comparar `proveedor` (el nombre publicado) con un texto por `=`, `<>` o `IN`, y
-  pida `proveedor_normalizado`. En todas las mediciones guardadas solo dos
-  respuestas lo hicieron (e03 del 2026-11-19 y f03 de hoy) y las dos estaban mal.
+- **Para f03 se agregó después la mejora 24:** el validador rechaza comparar
+  `proveedor` (el nombre publicado) con un texto por `=`, `<>` o `IN`, y pide
+  `proveedor_normalizado`. En todas las mediciones guardadas solo dos respuestas
+  lo hicieron (e03 del 2026-11-19 y f03 de hoy) y las dos estaban mal. No se
+  volvió a medir; la prueba del reintento está en el plan de mejoras.

@@ -245,6 +245,7 @@ como "después de corregir".
 | 21 | Rechazar `COUNT(*)` cuya columna dice `expedientes`, `proveedores` o `instituciones`; el mensaje dice qué `COUNT(DISTINCT …)` usar y se gasta el reintento | `validator.py` (código) | n02: 2,356,609 contratos llamados "expedientes" (son 1,768,189) |
 | 22 | Reglas del prompt: `COUNT(*)` cuenta contratos y cómo contar expedientes; "nulo" o "sin dato" es `IS NULL`, no cero, y una lectura dudosa va en `supuestos`; no agregar condiciones que la pregunta no pide | `prompt.py` | n02, n03 ("importe nulo" leído como cero) y n04 (tope de 10 años inventado) |
 | 23 | Pedir a Ollama un contexto de 8192 tokens; con el de 4096 el prompt se cortaba sin error | `llm/ollama_client.py`, `.env.example` | q01, q03 y q05 del golden set (ver abajo) |
+| 24 | Rechazar `proveedor` (el nombre publicado) comparado con un texto; se aplicó después de la cuarta medición | `validator.py` (código) | f03 de los casos del 69-B (ver "Cuarta medición") |
 
 No se corrigió n05 (omitió una columna pedida): una regla para eso sería a la
 medida de la pregunta. Tampoco el `COUNT(*)` en las uniones con el 69-B: la vista
@@ -309,5 +310,20 @@ medición que cuenta es la que sigue.
 preguntas nuevas ya no mide generalización; esa cifra sigue siendo el 57.1 %.
 
 f03 falló: unió la vista del 69-B sin que se pidiera y comparó el nombre
-publicado (`m.proveedor`) con `'GRUPO ELIBZA'`, que da 0 filas. Candidata, no
-aplicada: que el validador rechace comparar `proveedor` con un texto (mejora 24).
+publicado (`m.proveedor`) con `'GRUPO ELIBZA'`, que da 0 filas.
+
+**Mejora 24 (2026-11-23, después de la cuarta medición).** El validador rechaza
+comparar `proveedor`, de cualquiera de las dos vistas, con un texto por `=`, `<>`
+o `IN`. El mensaje pide `proveedor_normalizado` de `clean.v_contratos_agente` y
+dice que no se una la vista del 69-B si la pregunta no habla de él. `LIKE` e
+`ILIKE` no se tocan. Es código y solo actúa cuando aparece ese patrón:
+
+- De las 466 respuestas guardadas en `eval/results`, solo rechaza e03 del
+  2026-11-19 y f03 de las 11:45, que estaban mal. Los 47 SQL esperados pasan.
+- Al volver a correr f03, el modelo acertó en el primer intento (no es del todo
+  determinista entre corridas), así que se probó el reintento con el primer
+  intento fijo en el SQL incorrecto de la medición. El validador lo rechazó y el
+  modelo respondió en el segundo intento con `proveedor_normalizado`, sin unir la
+  vista del 69-B: 16 de 16 filas, igual al esperado. Agregó `fuente =
+  'comprasmx'` sin que se pidiera, que en este caso no cambia el resultado.
+- No se volvió a medir: las cifras de la cuarta medición son las que cuentan.

@@ -286,8 +286,37 @@ def validate_sql(query: str, max_rows: int = MAX_SQL_ROWS) -> str:
     # Last, so every earlier rule keeps its own message (LIMIT ALL is not a column).
     _check_columns(tree, {table.name.lower() for table in tables})
     _check_values(tree)
+    _check_published_name(tree)
     _check_count_units(tree)
     return tree.sql(dialect="postgres")
+
+
+def _check_published_name(tree: exp.Select) -> None:
+    """Rejects proveedor, the published name, compared with a text (A5, mejora 24).
+
+    The published name keeps punctuation and the company type ("S.A. DE C.V."), so
+    an exact comparison almost never matches. On 2026-11-23 f03 of
+    casos_empresa_69b filtered m.proveedor = 'GRUPO ELIBZA' and got 0 rows instead
+    of 16. LIKE and ILIKE are left alone.
+    """
+    for node in tree.find_all(exp.EQ, exp.NEQ, exp.In):
+        if isinstance(node, exp.In):
+            pairs = [(node.this, item) for item in node.expressions]
+        else:
+            pairs = [(node.this, node.expression), (node.expression, node.this)]
+        for column, value in pairs:
+            if (
+                isinstance(column, exp.Column)
+                and column.name.lower() == "proveedor"
+                and isinstance(value, exp.Literal)
+                and value.is_string
+            ):
+                raise SQLValidationError(
+                    "proveedor es el nombre como se publicó, con puntuación y tipo de sociedad, "
+                    "así que compararlo con un texto casi nunca coincide. Para buscar un proveedor "
+                    "filtra clean.v_contratos_agente con proveedor_normalizado; el sistema pasa el "
+                    "nombre a la forma normalizada. Si la pregunta no habla del 69-B, no unas esa vista."
+                )
 
 
 def _check_count_units(tree: exp.Select) -> None:
