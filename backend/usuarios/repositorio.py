@@ -11,7 +11,8 @@ from sqlalchemy.exc import IntegrityError
 from backend.usuarios.seguridad import ROLES, hashear
 
 _USUARIO_VALIDO = re.compile(r"^[a-z0-9][a-z0-9._-]{1,39}$")
-_COLUMNAS = "id, usuario, nombre, rol, activo, created_at, ultimo_acceso"
+_EMAIL_VALIDO = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_COLUMNAS = "id, usuario, nombre, rol, email, activo, created_at, ultimo_acceso"
 
 
 class UsuarioNoEncontrado(LookupError):
@@ -29,6 +30,16 @@ def validar_usuario(usuario: str) -> str:
     return usuario
 
 
+def validar_email(email: str | None) -> str | None:
+    """Correo en minúsculas, o None si viene vacío."""
+    email = (email or "").strip().lower()
+    if not email:
+        return None
+    if not _EMAIL_VALIDO.match(email):
+        raise ValueError(f"Correo inválido: {email!r}.")
+    return email
+
+
 def validar_rol(rol: str) -> str:
     if rol not in ROLES:
         raise ValueError(f"Rol inválido: {rol!r}. Usa: {', '.join(ROLES)}.")
@@ -36,7 +47,9 @@ def validar_rol(rol: str) -> str:
 
 
 class RepositorioUsuarios(Protocol):
-    def alta(self, usuario: str, nombre: str | None, rol: str, contrasena: str) -> dict[str, Any]: ...
+    def alta(self, usuario: str, nombre: str | None, rol: str, contrasena: str,
+             email: str | None = None) -> dict[str, Any]: ...
+    def cambiar_email(self, usuario: str, email: str | None) -> dict[str, Any]: ...
     def baja(self, usuario: str) -> dict[str, Any]: ...
     def cambiar_rol(self, usuario: str, rol: str) -> dict[str, Any]: ...
     def cambiar_contrasena(self, usuario: str, contrasena: str) -> dict[str, Any]: ...
@@ -45,6 +58,7 @@ class RepositorioUsuarios(Protocol):
         """Fila con ``hash_contrasena`` (solo para el login), o None."""
         ...
     def activo(self, usuario: str) -> dict[str, Any] | None: ...
+    def activo_por_email(self, email: str) -> dict[str, Any] | None: ...
     def registrar_acceso(self, usuario: str) -> None: ...
 
 
@@ -63,20 +77,22 @@ class RepositorioUsuariosSQL:
             raise UsuarioNoEncontrado(usuario)
         return dict(fila)
 
-    def alta(self, usuario: str, nombre: str | None, rol: str, contrasena: str) -> dict[str, Any]:
+    def alta(self, usuario: str, nombre: str | None, rol: str, contrasena: str,
+             email: str | None = None) -> dict[str, Any]:
         usuario, rol, hash_ = validar_usuario(usuario), validar_rol(rol), hashear(contrasena)
+        email = validar_email(email)
         try:
             with self.engine.begin() as conn:
                 fila = conn.execute(
                     text(f"""
-                        INSERT INTO audit.usuarios (usuario, nombre, rol, hash_contrasena)
-                        VALUES (:usuario, :nombre, :rol, :hash)
+                        INSERT INTO audit.usuarios (usuario, nombre, rol, hash_contrasena, email)
+                        VALUES (:usuario, :nombre, :rol, :hash, :email)
                         ON CONFLICT (usuario) DO UPDATE
-                            SET nombre = EXCLUDED.nombre, rol = EXCLUDED.rol,
+                            SET nombre = EXCLUDED.nombre, rol = EXCLUDED.rol, email = EXCLUDED.email,
                                 hash_contrasena = EXCLUDED.hash_contrasena, activo = TRUE
                             WHERE audit.usuarios.activo = FALSE
                         RETURNING {_COLUMNAS}"""),
-                    {"usuario": usuario, "nombre": nombre, "rol": rol, "hash": hash_},
+                    {"usuario": usuario, "nombre": nombre, "rol": rol, "hash": hash_, "email": email},
                 ).mappings().one_or_none()
         except IntegrityError as exc:
             raise ValueError(str(exc.orig)) from exc
@@ -92,6 +108,12 @@ class RepositorioUsuariosSQL:
 
     def cambiar_contrasena(self, usuario: str, contrasena: str) -> dict[str, Any]:
         return self._actualizar(usuario, "hash_contrasena = :hash", {"hash": hashear(contrasena)})
+
+    def cambiar_email(self, usuario: str, email: str | None) -> dict[str, Any]:
+        try:
+            return self._actualizar(usuario, "email = :email", {"email": validar_email(email)})
+        except IntegrityError as exc:
+            raise ValueError("Ese correo ya está asignado a otro usuario.") from exc
 
     def listar(self, incluir_inactivos: bool = False) -> list[dict[str, Any]]:
         filtro = "" if incluir_inactivos else "WHERE activo"
@@ -115,6 +137,14 @@ class RepositorioUsuariosSQL:
             fila = conn.execute(
                 text(f"SELECT {_COLUMNAS} FROM audit.usuarios WHERE usuario = :usuario AND activo"),
                 {"usuario": usuario},
+            ).mappings().one_or_none()
+        return dict(fila) if fila else None
+
+    def activo_por_email(self, email: str) -> dict[str, Any] | None:
+        with self.engine.connect() as conn:
+            fila = conn.execute(
+                text(f"SELECT {_COLUMNAS} FROM audit.usuarios WHERE email = :email AND activo"),
+                {"email": (email or "").strip().lower()},
             ).mappings().one_or_none()
         return dict(fila) if fila else None
 

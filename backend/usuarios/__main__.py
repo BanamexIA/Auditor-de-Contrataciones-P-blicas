@@ -28,7 +28,8 @@ from backend.usuarios.seguridad import ROLES, validar_contrasena
 def _linea(u: dict) -> str:
     estado = "activo" if u["activo"] else "baja"
     acceso = u["ultimo_acceso"] or "nunca"
-    return f"{u['usuario']:<20} {u['rol']:<8} {estado:<7} {u['nombre'] or '':<24} último acceso: {acceso}"
+    return (f"{u['usuario']:<20} {u['rol']:<8} {estado:<7} {u['nombre'] or '':<24} "
+            f"{u.get('email') or '':<30} último acceso: {acceso}")
 
 
 def _contrasena(desde_stdin: bool, leer=getpass.getpass, entrada=sys.stdin) -> str:
@@ -49,10 +50,14 @@ def main(argv: list[str] | None = None, repo: RepositorioUsuarios | None = None,
     alta.add_argument("--usuario", required=True)
     alta.add_argument("--rol", required=True, choices=ROLES)
     alta.add_argument("--nombre")
+    alta.add_argument("--email", help="Correo con el que entra por Cognito")
     alta.add_argument("--contrasena-stdin", action="store_true")
     cambio = sub.add_parser("contrasena", help="Cambiar la contraseña")
     cambio.add_argument("--usuario", required=True)
     cambio.add_argument("--contrasena-stdin", action="store_true")
+    correo = sub.add_parser("correo", help="Asignar o quitar el correo de Cognito")
+    correo.add_argument("--usuario", required=True)
+    correo.add_argument("--email", required=True, help="'' para quitarlo")
     rol = sub.add_parser("rol", help="Cambiar el rol")
     rol.add_argument("--usuario", required=True)
     rol.add_argument("--rol", required=True, choices=ROLES)
@@ -68,11 +73,14 @@ def main(argv: list[str] | None = None, repo: RepositorioUsuarios | None = None,
 
     try:
         if a.comando == "alta":
-            u = repo.alta(a.usuario, a.nombre, a.rol, _contrasena(a.contrasena_stdin, leer, entrada))
+            u = repo.alta(a.usuario, a.nombre, a.rol, _contrasena(a.contrasena_stdin, leer, entrada),
+                          email=a.email)
             print("Alta:", _linea(u))
         elif a.comando == "contrasena":
             u = repo.cambiar_contrasena(a.usuario, _contrasena(a.contrasena_stdin, leer, entrada))
             print("Contraseña cambiada:", u["usuario"])
+        elif a.comando == "correo":
+            print("Correo:", _linea(repo.cambiar_email(a.usuario, a.email)))
         elif a.comando == "rol":
             print("Rol:", _linea(repo.cambiar_rol(a.usuario, a.rol)))
         elif a.comando == "baja":
