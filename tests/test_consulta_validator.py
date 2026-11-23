@@ -474,5 +474,41 @@ class ProjectQueriesTests(unittest.TestCase):
                 validate_sql(block)
 
 
+class CountUnitsTests(unittest.TestCase):
+    """A5, mejora 21: COUNT(*) counts contracts, whatever the column is called."""
+
+    def test_n02_contracts_named_expedientes(self):
+        # casos_nuevos n02 as the model wrote it on 2026-11-23.
+        with self.assertRaisesRegex(SQLValidationError, r"COUNT\(DISTINCT codigo_expediente\)"):
+            validate_sql(
+                f"SELECT tipo_expediente, COUNT(*) AS expedientes FROM {CONTRATOS} "
+                "WHERE fuente = 'historico' AND NOT tipo_expediente IS NULL "
+                "GROUP BY tipo_expediente ORDER BY expedientes DESC, tipo_expediente LIMIT 200"
+            )
+
+    def test_other_units(self):
+        for alias, column in (
+            ("num_proveedores", "proveedor_normalizado"),
+            ("total_instituciones", "institucion"),
+            ("expediente", "codigo_expediente"),
+        ):
+            with self.subTest(alias=alias):
+                with self.assertRaisesRegex(SQLValidationError, rf"COUNT\(DISTINCT {column}\)"):
+                    validate_sql(f"SELECT COUNT(*) AS {alias} FROM {CONTRATOS} WHERE fuente = 'comprasmx' LIMIT 1")
+
+    def test_counts_of_contracts_and_distinct_counts_pass(self):
+        for query in (
+            f"SELECT tipo_expediente, COUNT(*) AS contratos FROM {CONTRATOS} GROUP BY tipo_expediente LIMIT 200",
+            f"SELECT codigo_expediente, COUNT(*) AS contratos_por_expediente FROM {CONTRATOS} GROUP BY codigo_expediente LIMIT 200",
+            f"SELECT proveedor_normalizado, COUNT(*) AS registros_proveedor FROM {CONTRATOS} GROUP BY proveedor_normalizado LIMIT 200",
+            f"SELECT fuente, COUNT(*) AS sin_proveedor FROM {CONTRATOS} WHERE proveedor_normalizado IS NULL GROUP BY fuente LIMIT 5",
+            f"SELECT COUNT(DISTINCT codigo_expediente) AS expedientes FROM {CONTRATOS} LIMIT 1",
+            f"SELECT COUNT(*) AS proveedores FROM (SELECT DISTINCT proveedor_normalizado FROM {CONTRATOS}) AS t LIMIT 1",
+            f"SELECT COUNT(*) AS coincidencias FROM {COINCIDENCIAS} LIMIT 1",
+        ):
+            with self.subTest(query=query):
+                validate_sql(query)
+
+
 if __name__ == "__main__":
     unittest.main()

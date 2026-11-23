@@ -230,5 +230,84 @@ cuánto generaliza, con la advertencia de que son 7 casos.
   incompleto, sin aviso (falla del código de cobertura); n04 agrega un filtro que
   nadie pidió; n05 y n06 usan `COUNT(*)` en una unión donde hacen falta
   contratos distintos.
-- No se aplicó ninguna corrección. Las candidatas están en el análisis; si se
-  aplican, hace falta otro conjunto de preguntas sin usar para medirlas.
+- La medición se guardó tal como salió (commit 842b295) antes de corregir nada.
+
+## Cuarta ronda (2026-11-23)
+
+Sale de los errores de las preguntas nuevas. Son reglas generales, no hechas a la
+medida de esas 8 preguntas, pero después de aplicarlas `casos_nuevos.yaml` ya no
+sirve para medir generalización: una nueva medición con ese archivo se reporta
+como "después de corregir".
+
+| # | Mejora | Dónde | Caso que la mostró |
+|---|---|---|---|
+| 20 | Aviso de años incompletos también cuando la consulta agrupa por año o mes de inicio, aunque no filtre años | `coverage.py` (código) | n06: mostró 2010 sin aviso |
+| 21 | Rechazar `COUNT(*)` cuya columna dice `expedientes`, `proveedores` o `instituciones`; el mensaje dice qué `COUNT(DISTINCT …)` usar y se gasta el reintento | `validator.py` (código) | n02: 2,356,609 contratos llamados "expedientes" (son 1,768,189) |
+| 22 | Reglas del prompt: `COUNT(*)` cuenta contratos y cómo contar expedientes; "nulo" o "sin dato" es `IS NULL`, no cero, y una lectura dudosa va en `supuestos`; no agregar condiciones que la pregunta no pide | `prompt.py` | n02, n03 ("importe nulo" leído como cero) y n04 (tope de 10 años inventado) |
+| 23 | Pedir a Ollama un contexto de 8192 tokens; con el de 4096 el prompt se cortaba sin error | `llm/ollama_client.py`, `.env.example` | q01, q03 y q05 del golden set (ver abajo) |
+
+No se corrigió n05 (omitió una columna pedida): una regla para eso sería a la
+medida de la pregunta. Tampoco el `COUNT(*)` en las uniones con el 69-B: la vista
+tiene una fila por contrato y da lo mismo que `COUNT(DISTINCT codigo_contrato)`.
+
+Las mejoras 20, 21 y 23 son deterministas y tienen pruebas (408 en total). La 22
+depende de que el modelo siga el prompt; con q18 una regla así no bastó.
+
+Para medir:
+
+```powershell
+.venv\Scripts\python -m eval.run_consulta --repeticiones 3
+```
+
+```powershell
+.venv\Scripts\python -m eval.run_consulta --casos eval/casos_nuevos.yaml
+```
+
+El golden set comprueba que nada se rompió (tiene que seguir arriba de 85 %).
+Los casos nuevos dicen si las correcciones funcionan en n02, n03 y n06.
+
+**2026-11-23 — El contexto de Ollama cortaba el prompt (mejora 23).** La primera
+corrida del golden set tras las mejoras 20 a 22 falló en q01, q03 y q05, que
+llevaban días acertando, y se detuvo en q07 por el límite de 120 s. La causa no
+fueron las mejoras sino el contexto: `llm/ollama_client.py` no pedía tamaño, y
+Ollama usa 4096 tokens. El prompt de sistema del agente ya tenía unos 4,000; con
+las reglas de la mejora 22 la entrada llegó a 4,094 y no quedaba lugar para la
+respuesta. Cuando la entrada no cabe, Ollama la corta por el principio, sin
+error, y el modelo pierde las reglas. Con `num_ctx` en 8192 (`OLLAMA_NUM_CTX`),
+q01, q03 y q05 vuelven a dar el resultado esperado y la entrada llega a 4,100
+tokens.
+
+La telemetría (`telemetry/results/llm_calls.csv`) muestra que esto ya pasaba en
+algunos reintentos, que llevan el SQL y el error anterior: 14 llamadas del
+2026-11-19 y 3 del 2026-11-20 quedaron en unos 2,050 tokens, la mitad del
+prompt. Las mediciones de esos días pueden haber perdido algún reintento por
+eso. La de preguntas nuevas del 2026-11-23 (10:55) no: sus 8 llamadas tuvieron
+entre 3,945 y 3,970 tokens, así que el 57.1 % no está afectado.
+
+**2026-11-23 — Primera medición con el contexto de 8192 (11:28).** Golden set
+87.5 % (q08 0 de 3, q18 0 de 3); casos nuevos 6 de 7; casos de A2 9 de 13;
+empresa 4 de 6; 69-B 6 de 6. Dos retrocesos los causó la mejora 22, que también
+decía "para contar proveedores, `COUNT(DISTINCT proveedor_normalizado)`": q08
+pasó a mostrar `proveedor_normalizado` en lugar del nombre publicado y c04 ("¿Qué
+proveedores aparecen mucho?") dejó de pedir aclaración. Se quitó esa parte de la
+regla; contar proveedores con `COUNT(*)` lo sigue deteniendo la mejora 21. Con el
+cambio, q08 y c04 vuelven a acertar. Esas carpetas de resultados no se suben: la
+medición que cuenta es la que sigue.
+
+## Cuarta medición (2026-11-23, 11:40)
+
+| Medición | 11-20 (15:16) | 11-23 (11:40) | Análisis |
+|---|---|---|---|
+| Golden set, 3 repeticiones | 93.8 %, consistencia 20 de 20 | **93.8 %**, consistencia 20 de 20 | [consulta_20261123_114032](../eval/results/consulta_20261123_114032/analisis.md) |
+| Preguntas nuevas | 57.1 % (antes de corregir) | **85.7 %**, después de corregir | el mismo |
+| Casos de A2 | 10 de 13 | 10 de 13 | el mismo |
+| Casos de empresa | 4 de 6 | 4 de 6 | el mismo |
+| Casos del 69-B | 6 de 6 | **5 de 6** | el mismo |
+
+**El golden set sigue arriba de la meta de 85 %**, solo falla q18. Las mejoras
+20 a 22 arreglaron n02, n03, n04 y n06 en el primer intento. El 85.7 % de las
+preguntas nuevas ya no mide generalización; esa cifra sigue siendo el 57.1 %.
+
+f03 falló: unió la vista del 69-B sin que se pidiera y comparó el nombre
+publicado (`m.proveedor`) con `'GRUPO ELIBZA'`, que da 0 filas. Candidata, no
+aplicada: que el validador rechace comparar `proveedor` con un texto (mejora 24).

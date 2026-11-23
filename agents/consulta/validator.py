@@ -48,6 +48,16 @@ _NAME_HINT = (
     "en institucion."
 )
 CATEGORY_HINTS = {"fuente": _NAME_HINT, "tipo_procedimiento_norm": _NAME_HINT}
+# COUNT(*) over the views counts contracts. A column alias that names another unit
+# says the model meant that unit (A5, mejora 21: on 2026-11-23, n02 of casos_nuevos
+# labeled 2,356,609 contracts as "expedientes"; there are 1,768,189).
+COUNT_UNITS = (
+    ("expedientes", re.compile(r"expedientes?"), "codigo_expediente"),
+    ("proveedores", re.compile(r"proveedor(es)?"), "proveedor_normalizado"),
+    ("instituciones", re.compile(r"instituci[oó]n(es)?"), "institucion"),
+)
+# Aliases that still count contracts: contratos_por_expediente, sin_proveedor, con_expediente.
+_CONTRACT_WORDS = re.compile(r"contratos?|registros?|filas?|sin|con")
 
 # Statements that write data or change the schema, even when nested inside a SELECT.
 WRITE_EXPRESSIONS = (
@@ -276,7 +286,34 @@ def validate_sql(query: str, max_rows: int = MAX_SQL_ROWS) -> str:
     # Last, so every earlier rule keeps its own message (LIMIT ALL is not a column).
     _check_columns(tree, {table.name.lower() for table in tables})
     _check_values(tree)
+    _check_count_units(tree)
     return tree.sql(dialect="postgres")
+
+
+def _check_count_units(tree: exp.Select) -> None:
+    """Rejects COUNT(*) named as expedientes, proveedores or instituciones (A5, mejora 21).
+
+    COUNT(*) over a subquery is left alone: it may count rows that are already
+    distinct, as in SELECT COUNT(*) AS proveedores FROM (SELECT DISTINCT ...) AS t.
+    """
+    for alias in tree.find_all(exp.Alias):
+        count = alias.this
+        if not (isinstance(count, exp.Count) and isinstance(count.this, exp.Star)):
+            continue
+        select = alias.find_ancestor(exp.Select)
+        source = select.args.get("from") if select is not None else None
+        if source is None or not isinstance(source.this, exp.Table):
+            continue
+        words = alias.alias.lower().split("_")
+        if any(_CONTRACT_WORDS.fullmatch(word) for word in words):
+            continue
+        for unit, pattern, column in COUNT_UNITS:
+            if any(pattern.fullmatch(word) for word in words):
+                raise SQLValidationError(
+                    f"COUNT(*) cuenta contratos, pero la columna {alias.alias} dice {unit}. "
+                    f"Para contar {unit} usa COUNT(DISTINCT {column}); si cuentas contratos, "
+                    "llama a la columna contratos."
+                )
 
 
 def _check_values(tree: exp.Select) -> None:
