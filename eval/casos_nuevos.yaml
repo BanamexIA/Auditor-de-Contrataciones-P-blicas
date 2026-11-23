@@ -12,10 +12,14 @@
 # - Se quitaron dos: "fecha de inicio no parseable" (no hay ninguna, el conteo
 #   daría 0) y la lista de proveedores del 69-B sin RFC exacto (repetía el
 #   filtro de n05 y no decía columnas ni orden).
+# - n05: pedía los contratos de ComprasMX con coincidencia por nombre pero no por
+#   RFC, y eso da 0: en ComprasMX las 27 coincidencias son solo por RFC y en el
+#   histórico las 790 son solo por nombre. Con una sola pregunta de una fuente,
+#   cualquier conteo de coincidencias de esa fuente daba lo mismo; ahora pide la
+#   tabla por fuente y tipo de coincidencia.
 #
-# POR VERIFICAR con la base encendida: que ningún resultado esperado salga vacío
-# o en cero sin sentido (sobre todo n05). Las cifras de las notas son del perfil
-# de la base del 2026-11-20.
+# Verificado el 2026-11-23 corriendo solo el SQL esperado (sin el agente): ningún
+# resultado sale vacío ni en cero. Las cifras de las notas son de esa corrida.
 - id: n01
   pregunta: ¿Cuántos contratos de ComprasMX hay por tipo de contratación?
   dificultad: facil
@@ -66,19 +70,19 @@
     LIMIT 10
   notas: 592 contratos tienen inicio posterior a la fecha de descarga (2026-10-16). "Proveedor" es el nombre publicado, no proveedor_normalizado. Puede mostrar nombres de personas físicas; no usarla en la evidencia de A6.
 - id: n05
-  pregunta: ¿Cuántos contratos de ComprasMX tienen coincidencia por nombre normalizado exacto, pero no por RFC exacto?
+  pregunta: ¿Cuántos contratos con coincidencia 69-B hay en cada fuente, según si la coincidencia es por RFC exacto o por nombre normalizado exacto?
   dificultad: dificil
   tipo_esperado: sql
   sql_esperado: |
-    SELECT COUNT(DISTINCT c.codigo_contrato) AS contratos
+    SELECT c.fuente, m.rfc_exacto, m.nombre_normalizado_exacto,
+           COUNT(DISTINCT c.codigo_contrato) AS contratos
     FROM clean.v_contratos_agente AS c
     JOIN clean.v_coincidencias_69b_agente AS m
       ON m.codigo_contrato = c.codigo_contrato
-    WHERE c.fuente = 'comprasmx'
-      AND m.nombre_normalizado_exacto
-      AND NOT m.rfc_exacto
-    LIMIT 1
-  notas: POR VERIFICAR. ComprasMX tiene 27 contratos con coincidencia y casi todas son por RFC, así que el resultado puede ser muy chico o cero; si es cero, cambiarla. Es una señal para revisión humana.
+    GROUP BY c.fuente, m.rfc_exacto, m.nombre_normalizado_exacto
+    ORDER BY c.fuente, m.rfc_exacto, m.nombre_normalizado_exacto
+    LIMIT 20
+  notas: 2 filas. ComprasMX, 27 contratos, solo por RFC; histórico, 790, solo por nombre (el histórico no trae RFC). Debe llevar las dos columnas de tipo de coincidencia; agrupar por nivel_confianza da otras columnas. Es una señal para revisión humana.
 - id: n06
   pregunta: ¿Cuántos contratos con coincidencia 69-B requieren revisión humana en cada año de inicio?
   dificultad: dificil
@@ -93,7 +97,7 @@
     GROUP BY EXTRACT(YEAR FROM c.fecha_inicio)::integer
     ORDER BY anio
     LIMIT 20
-  notas: Las dos fuentes; casi todas las coincidencias que requieren revisión son del histórico (solo por nombre). Debe llevar el aviso de años incompletos.
+  notas: Las dos fuentes, pero las 790 coincidencias que requieren revisión son del histórico (solo por nombre); salen 11 años. Debe llevar el aviso de años incompletos.
 - id: n07
   pregunta: ¿Cuántos contratos hay por ley en ComprasMX?
   dificultad: facil

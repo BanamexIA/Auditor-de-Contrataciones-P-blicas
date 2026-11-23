@@ -69,7 +69,7 @@ la respaldan (`agents/consulta/counts.py`):
 | `filas` | Las filas que devolvió la consulta |
 | `filas_totales` | Las que habría sin el `LIMIT`. Solo se consulta a la base si las filas llegaron al `LIMIT` |
 | `truncado` | `true` si el `LIMIT` cortó el resultado; entonces también se agrega un aviso en `supuestos` ("El resultado se cortó: se muestran 200 de 784 filas por el LIMIT.") |
-| `registros` | Cuántos registros de las vistas resume la respuesta, antes del `LIMIT`. En una consulta con agregados (`COUNT`, `SUM`, `GROUP BY`) son los que entran a los grupos; en una lista, cada fila es un registro |
+| `registros` | Cuántos registros de las vistas resume la respuesta, antes del `LIMIT`. En una consulta con agregados (`COUNT`, `SUM`, `GROUP BY`) son los que entran a los grupos; en una lista, cada fila es un registro. Si la consulta une vistas, cuenta las filas de la unión (un contrato con dos coincidencias cuenta dos veces) |
 
 Las consultas de conteo salen del mismo SQL y pasan por el validador. Si fallan
 (por ejemplo, por el límite de 60 s), los campos quedan en `null` y la respuesta

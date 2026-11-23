@@ -203,10 +203,32 @@ mismos casos que se miden, así que hace falta un conjunto de preguntas nuevas,
 sin usar, para saber cuánto generaliza el agente.
 
 **2026-11-21 — Preguntas nuevas:** `eval/casos_nuevos.yaml`, 8 casos (7 con SQL
-y 1 sin datos) escritos sin ver cómo responde el agente. Sus SQL esperados
-faltan de verificar con la base. No se deben usar para ajustar el agente antes
-de medirlas:
+y 1 sin datos) escritos sin ver cómo responde el agente. No se deben usar para
+ajustar el agente antes de medirlas:
 
 ```powershell
 .venv\Scripts\python -m eval.run_consulta --casos eval/casos_nuevos.yaml
 ```
+
+## Medición con preguntas nuevas (2026-11-23)
+
+El 2026-11-23 se verificó el SQL esperado con la base (sin el agente). n05 daba
+0 y se cambió antes de medir. Después se corrió el agente una vez.
+
+| Medición | Resultado | Análisis |
+|---|---|---|
+| Preguntas nuevas, 1 repetición | **57.1 %** del SQL (4 de 7); 62.5 % global | [consulta_casos_nuevos_20261123_105535](../eval/results/consulta_casos_nuevos_20261123_105535/analisis.md) |
+
+**Con preguntas que no vio, el agente baja de 93.8 % a 57.1 %.** El 93.8 % del
+golden set es con casos que sirvieron para ajustarlo; el 57.1 % es el que dice
+cuánto generaliza, con la advertencia de que son 7 casos.
+
+- Fallan n02 (cuenta contratos cuando se piden expedientes), n03 ("importe nulo"
+  leído como cero, sin anotarlo) y n05 (omite una columna pedida; las cifras son
+  correctas).
+- Tres que aciertan tienen problemas que el medidor no ve: n06 muestra 2010, año
+  incompleto, sin aviso (falla del código de cobertura); n04 agrega un filtro que
+  nadie pidió; n05 y n06 usan `COUNT(*)` en una unión donde hacen falta
+  contratos distintos.
+- No se aplicó ninguna corrección. Las candidatas están en el análisis; si se
+  aplican, hace falta otro conjunto de preguntas sin usar para medirlas.

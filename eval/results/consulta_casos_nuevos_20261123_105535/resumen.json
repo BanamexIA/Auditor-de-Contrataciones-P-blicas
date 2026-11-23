@@ -1,0 +1,31 @@
+{
+  "metadata": {
+    "archivo": "casos_nuevos.yaml",
+    "modelo": "qwen2.5:7b",
+    "casos": 8,
+    "repeticiones": 1,
+    "fecha": "2026-11-23T10:55:35",
+    "comparacion": "filas normalizadas; ignora alias, orden de columnas y orden de filas"
+  },
+  "resumen": {
+    "respuestas": 8,
+    "exactitud_sql_pct": 57.1,
+    "acierto_global_pct": 62.5,
+    "por_dificultad": {
+      "dificil": 50.0,
+      "facil": 66.7,
+      "media": 50.0
+    },
+    "por_tipo_esperado": {
+      "sin_datos": 100.0,
+      "sql": 57.1
+    },
+    "errores": {
+      "valores_distintos": 1,
+      "filas_distintas": 1,
+      "columnas_distintas": 1
+    },
+    "consistencia": null,
+    "esperados_vacios": []
+  }
+}
