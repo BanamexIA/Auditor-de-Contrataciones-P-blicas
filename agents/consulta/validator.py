@@ -288,7 +288,105 @@ def validate_sql(query: str, max_rows: int = MAX_SQL_ROWS) -> str:
     _check_values(tree)
     _check_published_name(tree)
     _check_count_units(tree)
+    _check_currency(tree)
     return tree.sql(dialect="postgres")
+
+
+# Aggregates that add up amounts. importe is in each contract's currency and is
+# not converted, so one of these over several currencies is not a real total.
+_AMOUNT_AGGREGATES = (exp.Sum, exp.Avg)
+
+
+def _names_column(node: exp.Expression, name: str) -> bool:
+    return any(column.name.lower() == name for column in node.find_all(exp.Column))
+
+
+def _amount_aggregates(tree: exp.Expression):
+    """SUM or AVG whose argument uses importe."""
+    for aggregate in tree.find_all(*_AMOUNT_AGGREGATES):
+        if _names_column(aggregate, "importe"):
+            yield aggregate
+
+
+def adds_amounts(query: str) -> bool:
+    """True if a validated query adds up or averages importe (A5, mejora 25)."""
+    return any(True for _ in _amount_aggregates(sqlglot.parse_one(query, read="postgres")))
+
+
+def _groups_by_currency(select: exp.Select) -> bool:
+    group = select.args.get("group")
+    if group is None:
+        return False
+    projections = select.expressions
+    for item in group.expressions:
+        node = item
+        if isinstance(item, exp.Literal) and not item.is_string and item.this.isdigit():
+            position = int(item.this)
+            if 1 <= position <= len(projections):
+                node = projections[position - 1].unalias()
+        elif isinstance(item, exp.Column) and not item.table:
+            for projection in projections:
+                if isinstance(projection, exp.Alias) and projection.alias.lower() == item.name.lower():
+                    node = projection.this
+        if _names_column(node, "moneda"):
+            return True
+    return False
+
+
+def _and_terms(condition: exp.Expression):
+    if isinstance(condition, exp.Paren):
+        yield from _and_terms(condition.this)
+    elif isinstance(condition, exp.And):
+        yield from _and_terms(condition.this)
+        yield from _and_terms(condition.expression)
+    else:
+        yield condition
+
+
+def _filters_one_currency(select: exp.Select) -> bool:
+    where = select.args.get("where")
+    if where is None:
+        return False
+    for term in _and_terms(where.this):
+        if isinstance(term, exp.EQ):
+            sides = (term.this, term.expression)
+            if any(isinstance(side, exp.Column) and side.name.lower() == "moneda" for side in sides) and any(
+                isinstance(side, exp.Literal) and side.is_string for side in sides
+            ):
+                return True
+        if (
+            isinstance(term, exp.In)
+            and isinstance(term.this, exp.Column)
+            and term.this.name.lower() == "moneda"
+            and len(term.expressions) == 1
+        ):
+            return True
+    return False
+
+
+def _check_currency(tree: exp.Select) -> None:
+    """Rejects SUM or AVG of importe that mixes currencies (A5, mejora 25).
+
+    HU-01 asks to separate foreign-currency contracts and say so. On 2026-11-23
+    c03 of casos_consulta added up ComprasMX amounts in pesos, dollars and euros
+    together. The query passes if it groups by moneda, filters a single currency,
+    or the aggregate itself uses moneda (SUM(CASE WHEN moneda = 'MXN' ...)).
+    """
+    for aggregate in _amount_aggregates(tree):
+        if _names_column(aggregate, "moneda"):
+            continue
+        window = aggregate.parent if isinstance(aggregate.parent, exp.Window) else None
+        if window is not None and any(_names_column(item, "moneda") for item in window.args.get("partition_by") or []):
+            continue
+        select = aggregate.find_ancestor(exp.Select)
+        if select is not None and (_groups_by_currency(select) or _filters_one_currency(select)):
+            continue
+        function = "SUM" if isinstance(aggregate, exp.Sum) else "AVG"
+        raise SQLValidationError(
+            f"{function}(importe) mezcla monedas: el importe está en la moneda de cada contrato "
+            "(MXN, USD, EUR…) y no se convierte. Agrupa por moneda o filtra una sola, por ejemplo "
+            "moneda = 'MXN'."
+        )
 
 
 def _check_published_name(tree: exp.Select) -> None:

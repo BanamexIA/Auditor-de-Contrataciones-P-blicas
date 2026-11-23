@@ -9,6 +9,7 @@ from agents.consulta.providers import add_suffix_variants, normalize_provider_li
 from agents.consulta.validator import (
     MAX_SQL_ROWS,
     add_missing_limit,
+    adds_amounts,
     add_order_tiebreaker,
     fix_alias_typos,
     validate_sql,
@@ -35,9 +36,15 @@ SUFFIX_NOTE = (
 )
 
 
+CURRENCY_NOTE = (
+    "El importe es el registrado en la moneda de cada contrato y no se convierte a pesos; "
+    "por eso se suma por moneda."
+)
+
+
 def is_system_note(text: str) -> bool:
     """Notes written by code, which the coverage filter must keep even if a name contains "completo"."""
-    return text in (LIMIT_ADDED_NOTE, SUFFIX_NOTE) or text.startswith(PROVIDER_NOTE_PREFIX)
+    return text in (LIMIT_ADDED_NOTE, SUFFIX_NOTE, CURRENCY_NOTE) or text.startswith(PROVIDER_NOTE_PREFIX)
 
 # Rules distilled from docs/capa_semantica.md; keep both in sync.
 DATA_RULES = """Reglas de los datos:
@@ -244,9 +251,13 @@ def parse_response(text: str) -> dict[str, Any]:
         supuestos.extend(provider_note(name) for name in dict.fromkeys(providers))
         if searched:
             supuestos.append(SUFFIX_NOTE)
+        safe_sql = validate_sql(sql)
+        if adds_amounts(safe_sql):
+            # A5, mejora 25: HU-01 asks to say that currencies are kept apart.
+            supuestos.append(CURRENCY_NOTE)
         return {
             "tipo": "sql",
-            "sql": validate_sql(sql),
+            "sql": safe_sql,
             "filtros": _text_list(payload, "filtros"),
             "supuestos": supuestos,
         }

@@ -246,6 +246,7 @@ como "después de corregir".
 | 22 | Reglas del prompt: `COUNT(*)` cuenta contratos y cómo contar expedientes; "nulo" o "sin dato" es `IS NULL`, no cero, y una lectura dudosa va en `supuestos`; no agregar condiciones que la pregunta no pide | `prompt.py` | n02, n03 ("importe nulo" leído como cero) y n04 (tope de 10 años inventado) |
 | 23 | Pedir a Ollama un contexto de 8192 tokens; con el de 4096 el prompt se cortaba sin error | `llm/ollama_client.py`, `.env.example` | q01, q03 y q05 del golden set (ver abajo) |
 | 24 | Rechazar `proveedor` (el nombre publicado) comparado con un texto; se aplicó después de la cuarta medición | `validator.py` (código) | f03 de los casos del 69-B (ver "Cuarta medición") |
+| 25 | Rechazar `SUM` o `AVG` de `importe` que mezcla monedas, y anotar en `supuestos` que el importe no se convierte; se aplicó después de la cuarta medición | `validator.py` y `prompt.py` (código) | c03 y c05 de los casos de A2 (ver "Monedas") |
 
 No se corrigió n05 (omitió una columna pedida): una regla para eso sería a la
 medida de la pregunta. Tampoco el `COUNT(*)` en las uniones con el 69-B: la vista
@@ -327,3 +328,41 @@ dice que no se una la vista del 69-B si la pregunta no habla de él. `LIKE` e
   vista del 69-B: 16 de 16 filas, igual al esperado. Agregó `fuente =
   'comprasmx'` sin que se pidiera, que en este caso no cambia el resultado.
 - No se volvió a medir: las cifras de la cuarta medición son las que cuentan.
+
+**Monedas: mejora 25 (2026-11-23).** La historia del Agente Consulta pide que
+"separa o convierte los contratos en moneda extranjera, y lo dice". El prompt ya
+decía que `importe` se suma por moneda, pero en la cuarta medición c03 sumó el
+importe de ComprasMX en pesos, dólares y euros juntos. Ahora:
+
+- El validador rechaza un `SUM` o `AVG` de `importe` si la consulta no agrupa por
+  `moneda` (por nombre, alias o posición), no filtra una sola moneda (`moneda =
+  'MXN'` o `IN` con un valor) y el agregado no usa `moneda` (`SUM(CASE WHEN
+  moneda = 'MXN' …)`). Una ventana con `PARTITION BY moneda` también pasa.
+- Si la respuesta suma o promedia importes, `supuestos` lleva: "El importe es el
+  registrado en la moneda de cada contrato y no se convierte a pesos; por eso se
+  suma por moneda."
+- De las 466 respuestas guardadas solo rechaza c03 y c05 (9 respuestas en total,
+  de varias corridas), y todas estaban mal. Los 47 SQL esperados pasan.
+- Con el agente, c03 y c05 se rechazan en el primer intento y el reintento ya
+  separa por moneda. Pero el reintento rehace la consulta desde la pregunta: en
+  c03 perdió el filtro de ComprasMX y en c05 agregó licitación pública sin que se
+  pidiera. Los dos casos esperan una aclaración, así que siguen fallando hasta que
+  se decida la mejora 7.
+- Candidata, no aplicada: que el reintento por un error del validador incluya el
+  SQL rechazado, como ya pasa con los errores de PostgreSQL, para que corrija esa
+  consulta en lugar de escribir otra.
+
+## Escenario 1 (A6, 2026-11-23)
+
+Seis preguntas en `eval/escenario1.yaml`, una por criterio de aceptación de la
+épica "Preguntas en lenguaje natural", corridas una vez con
+`python -m eval.run_escenario`. La evidencia y su análisis están en
+[escenario1_20261123_121015](../eval/results/escenario1_20261123_121015/analisis.md).
+
+**Se cumplen 5 de 6 criterios.** El conteo, la separación de monedas (en el
+reintento, por la mejora 25), el aviso de año incompleto, "sin datos" y el
+lenguaje neutral del 69-B salen como se esperaba. Falla s3 ("¿Cuántos contratos
+tiene la Secretaría de Salud en ComprasMX?"): no pidió aclaración y buscó el
+nombre en minúsculas, que da 0 contratos porque las instituciones están en
+mayúsculas. Candidata, no aplicada: pasar a mayúsculas el texto comparado con las
+columnas de dependencias (mejora 26).

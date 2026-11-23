@@ -8,6 +8,7 @@ import yaml
 from agents.consulta.prompt import (
     BOOLEAN_COLUMNS,
     BUILT_IN_EXAMPLES,
+    CURRENCY_NOTE,
     LIMIT_ADDED_NOTE,
     SUFFIX_NOTE,
     ResponseFormatError,
@@ -196,6 +197,19 @@ class ParseResponseTests(unittest.TestCase):
         response = parse_response(json.dumps({"tipo": "sql", "sql": VALID_SQL}))
         self.assertTrue(response["sql"].endswith("LIMIT 20"))
         self.assertNotIn(LIMIT_ADDED_NOTE, response["supuestos"])
+
+    def test_amounts_by_currency_get_the_currency_note(self):
+        # A5, mejora 25: HU-01 asks to say that currencies are kept apart.
+        response = parse_response(json.dumps({
+            "tipo": "sql",
+            "sql": "SELECT moneda, SUM(importe) AS importe FROM clean.v_contratos_agente GROUP BY moneda LIMIT 20",
+        }))
+        self.assertIn(CURRENCY_NOTE, response["supuestos"])
+        self.assertTrue(is_system_note(CURRENCY_NOTE))
+
+    def test_counts_get_no_currency_note(self):
+        response = parse_response(json.dumps({"tipo": "sql", "sql": VALID_SQL}))
+        self.assertNotIn(CURRENCY_NOTE, response["supuestos"])
 
     def test_sql_that_fails_the_validator_is_rejected(self):
         with self.assertRaisesRegex(SQLValidationError, "Tabla no permitida"):

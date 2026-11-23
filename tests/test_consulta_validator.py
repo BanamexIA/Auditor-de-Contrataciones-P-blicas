@@ -508,6 +508,44 @@ class PublishedNameTests(unittest.TestCase):
                 validate_sql(query)
 
 
+class CurrencyTests(unittest.TestCase):
+    """A5, mejora 25: SUM or AVG of importe must not mix currencies."""
+
+    def test_c03_as_the_model_wrote_it(self):
+        # casos_consulta c03 on 2026-11-23: pesos, dollars and euros added together.
+        with self.assertRaisesRegex(SQLValidationError, r"SUM\(importe\) mezcla monedas.*moneda = 'MXN'"):
+            validate_sql(
+                f"SELECT SUM(importe) AS importe_total FROM {CONTRATOS} WHERE fuente = 'comprasmx' "
+                "AND tipo_procedimiento_norm = 'adjudicacion_directa' AND fecha_inicio_valida LIMIT 200"
+            )
+
+    def test_mixed_currencies_are_rejected(self):
+        for query in (
+            f"SELECT AVG(importe) AS promedio FROM {CONTRATOS} LIMIT 1",
+            f"SELECT fuente, SUM(c.importe) AS total FROM {CONTRATOS} AS c GROUP BY fuente LIMIT 5",
+            f"SELECT SUM(importe) AS total FROM {CONTRATOS} WHERE moneda IN ('MXN', 'USD') LIMIT 1",
+            f"SELECT SUM(importe) AS total FROM {CONTRATOS} WHERE (moneda = 'MXN' OR fuente = 'historico') LIMIT 1",
+        ):
+            with self.subTest(query=query):
+                with self.assertRaisesRegex(SQLValidationError, "mezcla monedas"):
+                    validate_sql(query)
+
+    def test_separated_or_single_currency_passes(self):
+        for query in (
+            f"SELECT moneda, SUM(importe) AS total FROM {CONTRATOS} GROUP BY moneda LIMIT 20",
+            f"SELECT fuente, moneda, SUM(importe) AS total FROM {CONTRATOS} GROUP BY 1, 2 LIMIT 20",
+            f"SELECT c.moneda AS divisa, AVG(c.importe) AS promedio FROM {CONTRATOS} AS c GROUP BY divisa LIMIT 20",
+            f"SELECT SUM(importe) AS total FROM {CONTRATOS} WHERE fuente = 'comprasmx' AND moneda = 'MXN' LIMIT 1",
+            f"SELECT SUM(importe) AS total FROM {CONTRATOS} WHERE moneda IN ('USD') LIMIT 1",
+            f"SELECT SUM(CASE WHEN moneda = 'MXN' THEN importe END) AS total_mxn FROM {CONTRATOS} LIMIT 1",
+            f"SELECT codigo_contrato, SUM(importe) OVER (PARTITION BY moneda) AS total FROM {CONTRATOS} LIMIT 20",
+            f"SELECT MAX(t.total) AS mayor FROM (SELECT moneda, SUM(importe) AS total FROM {CONTRATOS} GROUP BY moneda) AS t LIMIT 1",
+            f"SELECT COUNT(*) AS contratos FROM {CONTRATOS} WHERE importe IS NULL LIMIT 1",
+        ):
+            with self.subTest(query=query):
+                validate_sql(query)
+
+
 class CountUnitsTests(unittest.TestCase):
     """A5, mejora 21: COUNT(*) counts contracts, whatever the column is called."""
 
