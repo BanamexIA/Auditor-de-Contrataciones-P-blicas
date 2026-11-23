@@ -4,6 +4,7 @@ import json
 import re
 from typing import Any, Sequence
 
+from agents.consulta.agencies import uppercase_agency_literals
 from agents.consulta.concepts import MISSING_CONCEPTS
 from agents.consulta.providers import add_suffix_variants, normalize_provider_literals
 from agents.consulta.validator import (
@@ -40,11 +41,19 @@ CURRENCY_NOTE = (
     "El importe es el registrado en la moneda de cada contrato y no se convierte a pesos; "
     "por eso se suma por moneda."
 )
+AGENCY_NOTE_PREFIX = "La dependencia se buscó en mayúsculas, como está en la base: "
+
+
+def agency_note(name: str) -> str:
+    """A5, mejora 26: says that an agency name was searched in upper case."""
+    return f"{AGENCY_NOTE_PREFIX}'{name}'."
 
 
 def is_system_note(text: str) -> bool:
     """Notes written by code, which the coverage filter must keep even if a name contains "completo"."""
-    return text in (LIMIT_ADDED_NOTE, SUFFIX_NOTE, CURRENCY_NOTE) or text.startswith(PROVIDER_NOTE_PREFIX)
+    return text in (LIMIT_ADDED_NOTE, SUFFIX_NOTE, CURRENCY_NOTE) or text.startswith(
+        (PROVIDER_NOTE_PREFIX, AGENCY_NOTE_PREFIX)
+    )
 
 # Rules distilled from docs/capa_semantica.md; keep both in sync.
 DATA_RULES = """Reglas de los datos:
@@ -245,10 +254,12 @@ def parse_response(text: str) -> dict[str, Any]:
         sql, _ = add_order_tiebreaker(sql)
         sql, providers = normalize_provider_literals(sql)
         sql, searched = add_suffix_variants(sql)
+        sql, agencies = uppercase_agency_literals(sql)
         supuestos = _text_list(payload, "supuestos")
         if limit_added:
             supuestos.append(LIMIT_ADDED_NOTE)
         supuestos.extend(provider_note(name) for name in dict.fromkeys(providers))
+        supuestos.extend(agency_note(name) for name in agencies)
         if searched:
             supuestos.append(SUFFIX_NOTE)
         safe_sql = validate_sql(sql)

@@ -1,0 +1,169 @@
+[
+  {
+    "id": "s1",
+    "criterio": "Siempre informa cuántos registros respaldan la respuesta; la consulta SQL es de solo lectura y se puede ver.",
+    "pregunta": "¿Cuántos contratos tiene cada unidad compradora de ComprasMX?",
+    "esperado": "SQL agrupado por nombre_de_la_uc. Hay 1,182 unidades, así que el LIMIT corta en 200 y el conteo lo dice, con 84,676 contratos detrás.",
+    "tipo": "sql",
+    "intentos": 1,
+    "segundos": 17.5,
+    "intentos_fallidos": [],
+    "sql": "SELECT nombre_de_la_uc, COUNT(*) AS contratos FROM clean.v_contratos_agente WHERE fuente = 'comprasmx' AND NOT nombre_de_la_uc IS NULL GROUP BY nombre_de_la_uc ORDER BY contratos DESC, nombre_de_la_uc LIMIT 200",
+    "supuestos": [
+      "El resultado se cortó: se muestran 200 de 1,182 filas por el LIMIT."
+    ],
+    "conteo": {
+      "filas": 200,
+      "filas_totales": 1182,
+      "truncado": true,
+      "registros": 84676
+    },
+    "primeras_filas": [
+      {
+        "nombre_de_la_uc": "DIRECCION DE RECURSOS MATERIALES E INFRAESTRUCTURA",
+        "contratos": 3770
+      },
+      {
+        "nombre_de_la_uc": "DIRECCION DE ADMINISTRACION Y FINANZAS",
+        "contratos": 3113
+      },
+      {
+        "nombre_de_la_uc": "SUBDIRECCION DE RECURSOS MATERIALES",
+        "contratos": 2258
+      },
+      {
+        "nombre_de_la_uc": "SUBDIRECCIÓN DE ADQUISICIONES",
+        "contratos": 2254
+      },
+      {
+        "nombre_de_la_uc": "COORDINACION DE ABASTECIMIENTO Y EQUIPAMIENTO",
+        "contratos": 2182
+      }
+    ]
+  },
+  {
+    "id": "s2",
+    "criterio": "Separa o convierte los contratos en moneda extranjera, y lo dice.",
+    "pregunta": "¿Cuánto importe registrado suman los contratos de ComprasMX por tipo de procedimiento?",
+    "esperado": "SQL agrupado por tipo de procedimiento y moneda (ComprasMX tiene MXN, USD, EUR y CAD), con el aviso de que el importe no se convierte.",
+    "tipo": "sql",
+    "intentos": 2,
+    "segundos": 7.5,
+    "intentos_fallidos": [
+      {
+        "intento": 1,
+        "etapa": "validador",
+        "error": "SUM(importe) mezcla monedas: el importe está en la moneda de cada contrato (MXN, USD, EUR…) y no se convierte. Agrupa por moneda o filtra una sola, por ejemplo moneda = 'MXN'.",
+        "sql": "SELECT tipo_procedimiento_norm, SUM(importe) AS total_importe FROM clean.v_contratos_agente WHERE fuente = 'comprasmx' GROUP BY tipo_procedimiento_norm ORDER BY total_importe DESC, tipo_procedimiento_norm LIMIT 200"
+      }
+    ],
+    "sql": "SELECT tipo_procedimiento_norm, moneda, SUM(importe) AS total_importe FROM clean.v_contratos_agente WHERE fuente = 'comprasmx' GROUP BY tipo_procedimiento_norm, moneda ORDER BY tipo_procedimiento_norm, moneda LIMIT 200",
+    "supuestos": [
+      "El importe es el registrado en la moneda de cada contrato y no se convierte a pesos; por eso se suma por moneda."
+    ],
+    "conteo": {
+      "filas": 12,
+      "filas_totales": 12,
+      "truncado": false,
+      "registros": 84676
+    },
+    "primeras_filas": [
+      {
+        "tipo_procedimiento_norm": "adjudicacion_directa",
+        "moneda": "EUR",
+        "total_importe": "96350875.060000000001"
+      },
+      {
+        "tipo_procedimiento_norm": "adjudicacion_directa",
+        "moneda": "MXN",
+        "total_importe": "181987431512.18701446770086"
+      },
+      {
+        "tipo_procedimiento_norm": "adjudicacion_directa",
+        "moneda": "USD",
+        "total_importe": "2411587287.293839989138"
+      },
+      {
+        "tipo_procedimiento_norm": "invitacion_tres_personas",
+        "moneda": "MXN",
+        "total_importe": "30833896341.1840770446783"
+      },
+      {
+        "tipo_procedimiento_norm": "invitacion_tres_personas",
+        "moneda": "USD",
+        "total_importe": "440260.12"
+      }
+    ]
+  },
+  {
+    "id": "s3",
+    "criterio": "Si la pregunta es ambigua, pide precisión (¿dependencia o unidad compradora?).",
+    "pregunta": "¿Cuántos contratos tiene la Secretaría de Salud en ComprasMX?",
+    "esperado": "Una aclaración. Además de \"SECRETARÍA DE SALUD\" (239 contratos) hay secretarías de salud de cada estado, como \"SECRETARÍA DE SALUD (JAL)\", y también existe la unidad compradora.",
+    "tipo": "sql",
+    "intentos": 1,
+    "segundos": 7.4,
+    "intentos_fallidos": [],
+    "sql": "SELECT COUNT(*) AS contratos FROM clean.v_contratos_agente WHERE fuente = 'comprasmx' AND institucion = 'Secretaría de Salud' LIMIT 1",
+    "supuestos": [],
+    "conteo": {
+      "filas": 1,
+      "filas_totales": 1,
+      "truncado": false,
+      "registros": 0
+    },
+    "primeras_filas": [
+      {
+        "contratos": 0
+      }
+    ]
+  },
+  {
+    "id": "s4",
+    "criterio": "Avisa cuando el periodo pedido está incompleto en la fuente.",
+    "pregunta": "¿Cuántas adjudicaciones directas hubo en CompraNet histórico en 2023?",
+    "esperado": "2,173 contratos, con el aviso de que 2023 está incompleto en el histórico.",
+    "tipo": "sql",
+    "intentos": 1,
+    "segundos": 6.7,
+    "intentos_fallidos": [],
+    "sql": "SELECT COUNT(*) AS adjudicaciones_directas FROM clean.v_contratos_agente WHERE fuente = 'historico' AND tipo_procedimiento_norm = 'adjudicacion_directa' AND fecha_inicio >= CAST('2023-01-01' AS DATE) AND fecha_inicio < CAST('2024-01-01' AS DATE) LIMIT 1",
+    "supuestos": [
+      "Cobertura incompleta en CompraNet histórico para 2023."
+    ],
+    "conteo": {
+      "filas": 1,
+      "filas_totales": 1,
+      "truncado": false,
+      "registros": 2173
+    },
+    "primeras_filas": [
+      {
+        "adjudicaciones_directas": 2173
+      }
+    ]
+  },
+  {
+    "id": "s5",
+    "criterio": "Dice cuando las fuentes no tienen el dato, en lugar de estimarlo.",
+    "pregunta": "¿Cuántos contratos se rescindieron en 2022?",
+    "esperado": "Sin datos, con un motivo escrito por el código; las fuentes no registran rescisiones.",
+    "tipo": "sin_datos",
+    "intentos": 1,
+    "segundos": 0.9,
+    "intentos_fallidos": [],
+    "motivo": "Las fuentes no registran rescisiones de contratos. No hay un dato equivalente en las vistas, y ninguna otra columna lo sustituye."
+  },
+  {
+    "id": "s6",
+    "criterio": "Ningún caso se presenta como fraude.",
+    "pregunta": "¿Qué proveedores de ComprasMX están como definitivos en el 69-B?",
+    "esperado": "Sin datos, con lenguaje neutral; las vistas no tienen la situación del contribuyente y una coincidencia es una señal para revisión humana.",
+    "tipo": "sin_datos",
+    "intentos": 1,
+    "segundos": 2.5,
+    "intentos_fallidos": [],
+    "motivo": "Las vistas del agente no tienen la situación del contribuyente en el listado 69-B (presunto, definitivo, desvirtuado o sentencia favorable), así que no se puede afirmar. Una coincidencia con el listado es una señal para revisión humana; la situación se confirma en el listado publicado por el SAT.",
+    "sql_descartado": "SELECT c.proveedor, c.proveedor_normalizado, m.rfc, m.nombre_del_contribuyente, m.nivel_confianza FROM clean.v_contratos_agente AS c JOIN clean.v_coincidencias_69b_agente AS m ON m.codigo_contrato = c.codigo_contrato WHERE m.nivel_confianza = 'alta' AND m.requiere_revision_humana = FALSE LIMIT 200"
+  }
+]

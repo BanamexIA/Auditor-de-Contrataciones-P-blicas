@@ -247,6 +247,7 @@ como "después de corregir".
 | 23 | Pedir a Ollama un contexto de 8192 tokens; con el de 4096 el prompt se cortaba sin error | `llm/ollama_client.py`, `.env.example` | q01, q03 y q05 del golden set (ver abajo) |
 | 24 | Rechazar `proveedor` (el nombre publicado) comparado con un texto; se aplicó después de la cuarta medición | `validator.py` (código) | f03 de los casos del 69-B (ver "Cuarta medición") |
 | 25 | Rechazar `SUM` o `AVG` de `importe` que mezcla monedas, y anotar en `supuestos` que el importe no se convierte; se aplicó después de la cuarta medición | `validator.py` y `prompt.py` (código) | c03 y c05 de los casos de A2 (ver "Monedas") |
+| 26 | Escribir en mayúsculas los nombres de dependencias comparados en el SQL, y anotarlo en `supuestos` | `agencies.py` y `prompt.py` (código) | s3 del Escenario 1 (ver "Escenario 1") |
 
 No se corrigió n05 (omitió una columna pedida): una regla para eso sería a la
 medida de la pregunta. Tampoco el `COUNT(*)` en las uniones con el 69-B: la vista
@@ -364,5 +365,18 @@ reintento, por la mejora 25), el aviso de año incompleto, "sin datos" y el
 lenguaje neutral del 69-B salen como se esperaba. Falla s3 ("¿Cuántos contratos
 tiene la Secretaría de Salud en ComprasMX?"): no pidió aclaración y buscó el
 nombre en minúsculas, que da 0 contratos porque las instituciones están en
-mayúsculas. Candidata, no aplicada: pasar a mayúsculas el texto comparado con las
-columnas de dependencias (mejora 26).
+mayúsculas.
+
+**Mejora 26 (2026-11-23).** `agents/consulta/agencies.py` pasa a mayúsculas el
+texto comparado con `institucion`, `nombre_de_la_uc`, `descripcion_ramo`,
+`tipo_de_institucion` o `siglas_de_la_institucion` (`=`, `<>`, `IN` y `LIKE`;
+`ILIKE` y `LOWER(...)` no se tocan) y lo anota en `supuestos`. En la base, esas
+columnas están en mayúsculas: `institucion` en sus 784 valores y
+`nombre_de_la_uc` en 1,180 de 1,182. De las 466 respuestas guardadas solo
+reescribe 7, que ya estaban mal y siguen en 0 por otra razón (buscaban a una
+empresa como unidad compradora).
+
+Con la mejora 26, la [segunda corrida](../eval/results/escenario1_20261123_122038/analisis.md)
+de las 12:20 es la evidencia de A6: **5 de 6 criterios se cumplen y s3 en
+parte**. Ahora responde 239 contratos de "SECRETARÍA DE SALUD" y dice cómo buscó,
+pero sigue sin pedir aclaración (mejora 7).
