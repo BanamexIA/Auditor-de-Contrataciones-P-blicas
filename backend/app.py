@@ -14,6 +14,7 @@ from backend.usuarios.repositorio import RepositorioUsuarios, RepositorioUsuario
 from backend.casos.api import bp as casos_bp
 from backend.demo.api import configurar_cors, demo_bp
 from backend.casos.repositorio import RepositorioCasos, RepositorioCasosSQL
+from backend.orquestador.api import bp as orquestador_bp
 from backend.reportes.almacen import AlmacenReportes, almacen_desde_entorno
 
 
@@ -99,6 +100,7 @@ def create_app(
     app.register_blueprint(casos_bp)
     app.register_blueprint(agentes_bp)
     app.register_blueprint(demo_bp)
+    app.register_blueprint(orquestador_bp)
     _errores_en_json(app)
     return app
 
