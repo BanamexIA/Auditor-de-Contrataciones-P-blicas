@@ -21,10 +21,14 @@ type Pestana = 'reporte' | 'senales';
 /** Acciones de Cognito que la app necesita (solo existen si el backend lo tiene configurado). */
 interface AccionesCognito {
   entrar: () => void;
-  /** Cierra la sesión en Cognito y vuelve al front. */
+  /** Cierra la sesión en el front y vuelve al login (no depende de la configuración de Cognito). */
   salir: () => void;
-  /** Olvida el token sin salir de Cognito (p. ej. si el backend lo rechazó). */
-  olvidar: () => void;
+  /** Cierra también la sesión de Cognito, para entrar con otra cuenta. Requiere que
+   *  http://localhost:5173/ esté en «Allowed sign-out URLs» del app client; null sin dominio. */
+  cambiarCuenta: (() => void) | null;
+  /** Olvida el token sin salir de Cognito (p. ej. si el backend lo rechazó) y guarda el motivo,
+   *  que sobrevive al reinicio de AppBase para mostrarse en el login. */
+  olvidar: (motivo: string) => void;
   error: string | null;
 }
 
@@ -38,6 +42,8 @@ export default function App({ cognito }: { cognito: CognitoPublico | null }) {
 function AppConCognito({ cognito }: { cognito: CognitoPublico }) {
   const oidc = useAuth();
   const token = oidc.user?.id_token ?? null;
+  // Por qué el backend rechazó la cuenta: AppBase se reinicia al perder el token y no lo recordaría.
+  const [rechazo, setRechazo] = useState<string | null>(null);
 
   // Antes de montar AppBase, para que su primera llamada ya lleve el token.
   if (token && session.token !== token) session.set(token);
@@ -45,15 +51,27 @@ function AppConCognito({ cognito }: { cognito: CognitoPublico }) {
   if (oidc.isLoading || oidc.activeNavigator) return <div className="viewer-status">Conectando con la cuenta del equipo…</div>;
 
   const acciones: AccionesCognito = {
-    entrar: () => void oidc.signinRedirect(),
-    salir: () => {
-      const url = urlSalidaCognito(cognito);
-      void oidc.removeUser().finally(() => {
-        if (url) window.location.href = url;
-      });
+    entrar: () => {
+      setRechazo(null);
+      void oidc.signinRedirect();
     },
-    olvidar: () => void oidc.removeUser(),
-    error: oidc.error ? `No se pudo iniciar sesión con la cuenta del equipo: ${oidc.error.message}` : null,
+    salir: () => {
+      setRechazo(null);
+      void oidc.removeUser(); // sin token, AppBase se reinicia y muestra el login
+    },
+    cambiarCuenta: urlSalidaCognito(cognito)
+      ? () => {
+          const url = urlSalidaCognito(cognito)!;
+          void oidc.removeUser().finally(() => {
+            window.location.href = url;
+          });
+        }
+      : null,
+    olvidar: (motivo) => {
+      setRechazo(motivo);
+      void oidc.removeUser();
+    },
+    error: oidc.error ? `No se pudo iniciar sesión con la cuenta del equipo: ${oidc.error.message}` : rechazo,
   };
   // key: al cambiar el token (entrar, renovar, salir) AppBase vuelve a comprobar la sesión.
   return <AppBase key={token ?? 'sin-token'} cognito={acciones} />;
@@ -78,15 +96,17 @@ function AppBase({ cognito }: { cognito: AccionesCognito | null }) {
       setSesion({ estado: 'lista', usuario: await auth.yo() });
     } catch (err) {
       // 401: p. ej. una cuenta de Cognito que no está dada de alta en el sistema; el backend dice por qué.
-      if (err instanceof ApiError && err.status === 401) setSesion({ estado: 'sin_sesion', aviso: err.message });
-      else if (!session.token) setSesion({ estado: 'sin_sesion' });
+      if (err instanceof ApiError && err.status === 401) {
+        cognito?.olvidar(err.message); // va después del aviso genérico de onUnauthorized: queda este
+        setSesion({ estado: 'sin_sesion', aviso: err.message });
+      } else if (!session.token) setSesion({ estado: 'sin_sesion' });
       else setSesion({ estado: 'error', mensaje: (err as Error).message });
     }
   }, []);
 
   useEffect(() => {
     session.onUnauthorized(() => {
-      cognito?.olvidar();
+      cognito?.olvidar('Tu sesión terminó. Vuelve a entrar.');
       setSesion({ estado: 'sin_sesion', aviso: 'Tu sesión terminó. Vuelve a entrar.' });
     });
     void iniciar();
@@ -123,6 +143,7 @@ function AppBase({ cognito }: { cognito: AccionesCognito | null }) {
         aviso={cognito?.error ?? sesion.aviso}
         onLogin={(usuario) => setSesion({ estado: 'lista', usuario })}
         onEntrarCognito={cognito?.entrar}
+        onCambiarCuenta={cognito?.cambiarCuenta ?? undefined}
       />
     );
 
