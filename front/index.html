@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Auditor de Contrataciones</title>
+<style>
+  :root {
+    --fondo: #f6f7f9; --panel: #fff; --texto: #1d2330; --suave: #5d6677; --borde: #dde1e8;
+    --acento: #0a5bd3; --error: #b42318; --aviso: #8a5a00; --aviso-fondo: #fff6e0;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+         background: var(--fondo); color: var(--texto); }
+  main { max-width: 1000px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--suave); margin: 0 0 20px; }
+  .panel { background: var(--panel); border: 1px solid var(--borde); border-radius: 8px;
+           padding: 16px; margin-bottom: 16px; }
+  label { display: block; font-weight: 600; margin-bottom: 6px; }
+  input, textarea { width: 100%; font: inherit; padding: 8px 10px; border: 1px solid var(--borde);
+                    border-radius: 6px; background: #fff; color: inherit; }
+  textarea { min-height: 80px; resize: vertical; }
+  button { font: inherit; font-weight: 600; padding: 8px 16px; border-radius: 6px; border: 0;
+           background: var(--acento); color: #fff; cursor: pointer; }
+  button:disabled { opacity: .6; cursor: wait; }
+  .fila { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; }
+  .fila > div { flex: 1 1 200px; }
+  .acciones { display: flex; gap: 12px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+  .estado { color: var(--suave); }
+  .error { color: var(--error); }
+  .aviso { background: var(--aviso-fondo); color: var(--aviso); padding: 10px 12px; border-radius: 6px; }
+  .meta { color: var(--suave); font-size: 13px; }
+  pre { background: #f0f2f5; padding: 10px; border-radius: 6px; overflow-x: auto; white-space: pre-wrap; }
+  .tabla { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { border-bottom: 1px solid var(--borde); padding: 6px 8px; text-align: left; vertical-align: top; }
+  th { background: #f0f2f5; position: sticky; top: 0; }
+  .oculto { display: none; }
+  details summary { cursor: pointer; color: var(--acento); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Auditor de Contrataciones Públicas</h1>
+  <p class="sub">Escribe una pregunta sobre los contratos; el Agente Consulta la responde con datos de ComprasMX.</p>
+
+  <section class="panel" id="panel-conexion">
+    <div class="fila">
+      <div><label for="api">API</label><input id="api" value="http://localhost:5000"></div>
+      <div class="oculto" id="campo-usuario"><label for="usuario">Usuario</label><input id="usuario" autocomplete="username"></div>
+      <div class="oculto" id="campo-contrasena"><label for="contrasena">Contraseña</label><input id="contrasena" type="password" autocomplete="current-password"></div>
+      <button id="conectar">Conectar</button>
+    </div>
+    <p class="estado" id="estado-conexion"></p>
+  </section>
+
+  <section class="panel">
+    <label for="pregunta">Pregunta</label>
+    <textarea id="pregunta" placeholder="Ej.: Lista 10 contratos de 2026 con proveedores en el listado 69-B del SAT"></textarea>
+    <div class="acciones">
+      <button id="preguntar">Preguntar</button>
+      <span class="estado" id="estado-pregunta"></span>
+    </div>
+  </section>
+
+  <section id="respuesta"></section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const sesion = {
+  get token() { try { return sessionStorage.getItem("token"); } catch { return null; } },
+  set token(v) { try { v ? sessionStorage.setItem("token", v) : sessionStorage.removeItem("token"); } catch {} },
+};
+try { const api = localStorage.getItem("api"); if (api) $("api").value = api; } catch {}
+
+const api = () => $("api").value.trim().replace(/\/+$/, "");
+
+async function llamar(metodo, ruta, cuerpo) {
+  const headers = { "Content-Type": "application/json" };
+  if (sesion.token) headers.Authorization = `Bearer ${sesion.token}`;
+  const r = await fetch(api() + ruta, { method: metodo, headers, body: cuerpo ? JSON.stringify(cuerpo) : undefined });
+  const datos = await r.json().catch(() => ({}));
+  return { codigo: r.status, datos };
+}
+
+function texto(el, msg, clase = "estado") { el.className = clase; el.textContent = msg; }
+
+async function conectar() {
+  const estado = $("estado-conexion");
+  try { localStorage.setItem("api", api()); } catch {}
+  texto(estado, "Conectando…");
+  try {
+    const salud = await llamar("GET", "/health");
+    if (salud.datos.auth !== "activa") { texto(estado, "Conectado (sin inicio de sesión)."); return; }
+    if (sesion.token && (await llamar("GET", "/auth/yo")).codigo === 200) {
+      texto(estado, "Conectado con sesión iniciada."); return;
+    }
+    sesion.token = null;
+    $("campo-usuario").classList.remove("oculto");
+    $("campo-contrasena").classList.remove("oculto");
+    const usuario = $("usuario").value.trim(), contrasena = $("contrasena").value;
+    if (!usuario || !contrasena) { texto(estado, "La API pide sesión: escribe usuario y contraseña y vuelve a conectar."); return; }
+    const r = await llamar("POST", "/auth/login", { usuario, contrasena });
+    $("contrasena").value = "";
+    if (r.codigo !== 200) { texto(estado, r.datos.error?.mensaje || "No se pudo iniciar sesión.", "error"); return; }
+    sesion.token = r.datos.token;
+    texto(estado, `Sesión iniciada como ${usuario}.`);
+  } catch {
+    texto(estado, "No se pudo llegar a la API. Revisa la URL, el túnel y que el backend permita este origen (CORS_ORIGENES).", "error");
+  }
+}
+
+function celda(v) {
+  if (v === null || v === undefined) return "";
+  return typeof v === "object" ? JSON.stringify(v) : String(v);
+}
+
+function tabla(filas) {
+  const cols = Object.keys(filas[0]);
+  const t = document.createElement("table");
+  t.innerHTML = "<thead><tr></tr></thead><tbody></tbody>";
+  cols.forEach((c) => { const th = document.createElement("th"); th.textContent = c; t.tHead.rows[0].appendChild(th); });
+  filas.forEach((f) => {
+    const tr = t.tBodies[0].insertRow();
+    cols.forEach((c) => { tr.insertCell().textContent = celda(f[c]); });
+  });
+  const envoltura = document.createElement("div");
+  envoltura.className = "tabla";
+  envoltura.appendChild(t);
+  return envoltura;
+}
+
+function mostrar(pregunta, r) {
+  const panel = document.createElement("article");
+  panel.className = "panel";
+  const h = document.createElement("h2");
+  h.style.fontSize = "16px"; h.style.margin = "0 0 8px";
+  h.textContent = pregunta;
+  panel.appendChild(h);
+  const d = r.datos;
+
+  if (d.tipo === "sql") {
+    const meta = document.createElement("p");
+    meta.className = "meta";
+    meta.textContent = `${d.total_filas} fila(s)` + (d.total_filas > d.filas.length ? ` (se muestran ${d.filas.length})` : "")
+      + ` · ${d.modelo} en ${d.equipo} · caso ${d.caso_id}`;
+    panel.appendChild(meta);
+    if (d.supuestos?.length) {
+      const s = document.createElement("p");
+      s.className = "aviso";
+      s.textContent = "Supuestos: " + d.supuestos.join(" · ");
+      panel.appendChild(s);
+    }
+    if (d.filas.length) panel.appendChild(tabla(d.filas));
+    else { const p = document.createElement("p"); p.textContent = "La consulta no devolvió filas."; panel.appendChild(p); }
+    const det = document.createElement("details");
+    det.innerHTML = "<summary>Ver SQL generado</summary>";
+    const pre = document.createElement("pre"); pre.textContent = d.sql; det.appendChild(pre);
+    panel.appendChild(det);
+  } else {
+    const p = document.createElement("p");
+    p.className = d.tipo === "bloqueado" && r.codigo === 200 ? "aviso" : "error";
+    p.textContent = d.motivo || d.error?.mensaje || `Error ${r.codigo}`;
+    panel.appendChild(p);
+  }
+  $("respuesta").prepend(panel);
+}
+
+async function preguntar() {
+  const pregunta = $("pregunta").value.trim();
+  const estado = $("estado-pregunta");
+  if (!pregunta) { texto(estado, "Escribe una pregunta.", "error"); return; }
+  $("preguntar").disabled = true;
+  const inicio = Date.now();
+  const reloj = setInterval(() => texto(estado, `El agente está pensando… ${Math.round((Date.now() - inicio) / 1000)} s`), 1000);
+  texto(estado, "El agente está pensando…");
+  try {
+    const r = await llamar("POST", "/demo/preguntar", { pregunta });
+    if (r.codigo === 401) { sesion.token = null; texto(estado, "Tu sesión expiró: vuelve a conectar.", "error"); return; }
+    mostrar(pregunta, r);
+    texto(estado, `Respondió en ${Math.round((Date.now() - inicio) / 1000)} s.`);
+  } catch {
+    texto(estado, "No se pudo llegar a la API.", "error");
+  } finally {
+    clearInterval(reloj);
+    $("preguntar").disabled = false;
+  }
+}
+
+$("conectar").addEventListener("click", conectar);
+$("preguntar").addEventListener("click", preguntar);
+$("pregunta").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) preguntar(); });
+conectar();
+</script>
+</body>
+</html>
