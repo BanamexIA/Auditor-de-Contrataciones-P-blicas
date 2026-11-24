@@ -29,6 +29,7 @@ cada endpoint están en [`docs/contratos/`](contratos/README.md).
 | `GET` | [`/casos/<id>/reportes/<version>/archivo`](#get-casosidreportesversionarchivo) | Descargar un reporte | Front |
 | `GET` | [`/casos/<id>/reportes/<version>/contenido`](#get-casosidreportesversioncontenido) | Bytes del reporte vía backend (visor PDF) | Front |
 | `GET` | [`/casos/<id>/telemetria`](#get-casosidtelemetria) | Tokens y latencia del modelo en el caso (B9) | Front, evaluación |
+| `POST` | [`/casos/<id>/orquestar`](#post-casosidorquestar) | Correr el orquestador (los 3 agentes) sobre un caso `recibido` | Front |
 | `POST` | [`/demo/preguntar`](#post-demopreguntar) | Demo: el Agente Consulta contesta una pregunta | Front de demo |
 | `POST` | [`/demo/casos/<id>/analizar`](#post-democasosidanalizar) | Demo: calidad, detección, normas y reporte de un caso consultado | Front |
 | `GET` | [`/agentes`](#get-agentes) | Laptops con Ollama registradas y su estado | Front, monitoreo |
@@ -318,6 +319,21 @@ Igual que `/archivo`, pero **nunca redirige a S3**: el backend lee el archivo, v
 y entrega los bytes (`X-Content-SHA256`). Es para visores que leen el PDF con `fetch` (pdf.js),
 porque el navegador no puede leer el bucket directo sin CORS. Requiere sesión.
 Errores: `404 reporte_no_encontrado`, `500 reporte_corrupto`, `503 almacen_no_disponible`.
+
+## `POST /casos/<id>/orquestar`
+
+Lanza el orquestador (LangGraph, ver [orquestador.md](orquestador.md)) sobre un caso en
+`recibido`. Corre en segundo plano y responde de inmediato; el front sigue el avance con
+`GET /casos/<id>` y su bitácora. El caso termina en `en_revision` o en `bloqueado` con el motivo.
+No recibe cuerpo.
+
+```json
+{"caso_id": "6f1c…", "estado": "recibido",
+ "mensaje": "El orquestador empezó. Sigue el avance en /casos/<id> y su bitácora."}
+```
+
+**202** · **404** `caso_no_encontrado` · **409** `transicion_invalida` (el caso no está en
+`recibido`) · **409** `en_curso` (el orquestador ya trabaja en ese caso).
 
 ## `POST /demo/casos/<id>/analizar`
 
