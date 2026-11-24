@@ -32,7 +32,7 @@ sudo docker compose exec -T db sh -c 'psql -q -v ON_ERROR_STOP=1 -U "$POSTGRES_U
 # Usuario nuevo (pide una contraseña local de respaldo)
 sudo docker compose exec -it backend python -m backend.usuarios alta --usuario ana --rol auditor --email ana@correo.com
 # Usuario que ya existía
-sudo docker compose exec backend python -m backend.usuarios correo --usuario emiliano --email emiliano@correo.com < /dev/null
+sudo docker compose exec -T backend python -m backend.usuarios correo --usuario emiliano --email emiliano@correo.com < /dev/null
 ```
 
 El correo debe ser el mismo con el que la persona está en Cognito y estar **verificado** allá.

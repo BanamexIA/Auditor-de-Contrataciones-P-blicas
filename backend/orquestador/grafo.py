@@ -85,7 +85,9 @@ def _nodos_listos(deps: Dependencias, limites: Limites) -> dict[str, Callable]:
     for nombre, fabrica in NODOS.items():
         nodo = fabrica(deps, limites)
         # "bloquear" no se vigila: siempre tiene que poder correr, aun pasado el límite.
-        listos[nombre] = nodo if nombre == "bloquear" else vigilar(nombre, nodo, deps, limites)
+        # "entregar" no revisa el tiempo: solo corre si el reporte ya se guardó.
+        listos[nombre] = nodo if nombre == "bloquear" else vigilar(
+            nombre, nodo, deps, limites, revisar_tiempo=nombre != "entregar")
     return listos
 
 

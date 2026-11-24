@@ -54,6 +54,9 @@ class Dependencias:
     evaluar_calidad: Callable[[str, list[str]], Any] | None = None
     reloj: Callable[[], float] = time.monotonic
     usuario_bitacora: str = "orquestador"
+    # False: el reporte usa las narrativas deterministas de respaldo (segundos en vez de una llamada
+    # al modelo por señal). Señales, normas y cifras son las mismas.
+    narrativa_llm: bool = True
     log: Callable[[str], None] = field(default=lambda texto: None)
 
 
@@ -144,8 +147,12 @@ class ClienteBlindado:
 
 # ----------------------------------------------------------------------------- vigilante (O4)
 def vigilar(nombre: str, fn: Callable[[EstadoOrquestador], dict], deps: Dependencias,
-            limites: Limites) -> Callable[[EstadoOrquestador], dict]:
-    """Envuelve un nodo: cuenta pasos, revisa el tiempo y convierte fallas en motivo de bloqueo."""
+            limites: Limites, revisar_tiempo: bool = True) -> Callable[[EstadoOrquestador], dict]:
+    """Envuelve un nodo: cuenta pasos, revisa el tiempo y convierte fallas en motivo de bloqueo.
+
+    ``revisar_tiempo=False`` para "entregar": si el reporte ya se guardó, pasarse del tiempo en
+    la etapa anterior no debe dejar el caso bloqueado con el trabajo terminado.
+    """
 
     def nodo(estado: EstadoOrquestador) -> dict:
         pasos = estado.get("pasos", 0) + 1
@@ -155,7 +162,7 @@ def vigilar(nombre: str, fn: Callable[[EstadoOrquestador], dict], deps: Dependen
                 f"Se alcanzó el límite de {limites.max_pasos} pasos del orquestador antes de la etapa "
                 f"'{nombre}'.")}
         inicio = estado.get("inicio")
-        if inicio is not None and deps.reloj() - inicio > limites.tiempo_max_s:
+        if revisar_tiempo and inicio is not None and deps.reloj() - inicio > limites.tiempo_max_s:
             return {**base, "motivo_bloqueo": (
                 f"Se agotó el tiempo máximo del caso ({limites.tiempo_max_s} s) antes de la etapa "
                 f"'{nombre}'.")}
@@ -310,14 +317,13 @@ def nodo_normativo(deps: Dependencias, limites: Limites):
             registrar_error(exc, "RAG no disponible")
             base = None
 
-        fallas: list[str] = []
+        fallas: list[Exception] = []
 
         def recuperar(consulta, fecha, top_k):
             try:
                 return base(consulta, fecha, top_k)
             except Exception as exc:  # una búsqueda fallida deja esa señal sin norma, no tumba el caso
-                fallas.append(type(exc).__name__)
-                registrar_error(exc, "Búsqueda normativa")
+                fallas.append(exc)  # se registran juntas al final: un evento, no uno por señal
                 return []
 
         evaluadas = [s for s in det["senales"] if s["estado"] == "evaluada"]
@@ -336,6 +342,12 @@ def nodo_normativo(deps: Dependencias, limites: Limites):
             normas, sin_norma = recuperar_normas(det["senales"], contratos, recuperar)
             normas, sin_norma, sospechosos = apartar_fragmentos_sospechosos(_json(normas), sin_norma)
             if fallas:
+                tipos = sorted({type(f).__name__ for f in fallas})
+                repo.registrar_evento(caso_id, ERROR, {
+                    "tipo": tipos[0] if len(tipos) == 1 else "varios",
+                    "mensaje": (f"Búsqueda normativa: {len(fallas)} búsqueda(s) fallaron "
+                                f"({', '.join(tipos)}). Primera: {fallas[0]}")[:300],
+                    "busquedas_fallidas": len(fallas)})
                 parciales.append(f"{len(fallas)} búsqueda(s) normativa(s) fallaron; esas señales "
                                  "quedan sin norma.")
             if sospechosos:
@@ -373,6 +385,11 @@ def nodo_reportes(deps: Dependencias, limites: Limites):
         parciales: list[str] = []
         # O5: se vuelve a verificar la laptop justo antes de redactar. Si no hay ninguna, el reporte
         # sale con las narrativas deterministas de respaldo (cifras, señales y normas son las reales).
+        if not deps.narrativa_llm:
+            reporte = deps.generar_reporte(caso_id, estado["deteccion"], None, estado.get("agente"))
+            repo.transitar(caso_id, e.REPORTADO, None, usuario=deps.usuario_bitacora)
+            deps.log(f"  reporte v{reporte.get('version')} guardado (narrativas de respaldo)")
+            return {"reporte": _json(reporte), "completadas": ["reportes"]}
         try:
             agente = deps.seleccionar_agente(estado.get("usuario"))
             cliente = ClienteBlindado(deps.crear_cliente(agente))

@@ -72,7 +72,7 @@ sudo docker compose exec -it backend python -m backend.usuarios contrasena --usu
 sudo docker compose exec backend python -m backend.usuarios rol --usuario ana --rol admin
 sudo docker compose exec backend python -m backend.usuarios baja --usuario ana
 # Cognito: correo con el que la persona entra (también: alta ... --email ana@correo.com)
-sudo docker compose exec backend python -m backend.usuarios correo --usuario ana --email ana@correo.com
+sudo docker compose exec -T backend python -m backend.usuarios correo --usuario ana --email ana@correo.com < /dev/null
 ```
 
 `alta` y `contrasena` piden la contraseña sin mostrarla (por eso `-it`). La

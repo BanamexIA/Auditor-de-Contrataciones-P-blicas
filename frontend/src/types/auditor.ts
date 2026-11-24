@@ -27,6 +27,17 @@ export interface Caso {
 
 export type Fila = Record<string, unknown>;
 
+/** Evento de GET /casos/<id>/bitacora (contrato 5). */
+export interface EventoBitacora {
+  id: number;
+  etapa: EstadoCaso;
+  evento: string;
+  detalle: Record<string, unknown>;
+  modelo: string | null;
+  equipo: string | null;
+  created_at: string;
+}
+
 /** Respuesta de POST /demo/preguntar. */
 export type RespuestaPregunta =
   | {

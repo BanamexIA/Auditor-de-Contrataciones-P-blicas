@@ -1,4 +1,4 @@
-import type { Fila, ReporteRef } from './auditor';
+import type { EstadoCaso, Fila, ReporteRef } from './auditor';
 
 export type ChatRole = 'user' | 'assistant';
 
@@ -9,8 +9,16 @@ export interface ResultadoConsulta {
   supuestos: string[];
   totalFilas: number;
   filas: Fila[];
-  modelo: string;
-  equipo: string;
+  modelo: string | null;
+  equipo: string | null;
+}
+
+/** Avance del orquestador sobre el caso (se actualiza mientras corre). */
+export interface Progreso {
+  estado: EstadoCaso;
+  segundos: number;
+  /** Resumen de lo que ya se sabe, p. ej. "13 señales · 0 fragmentos de norma". */
+  resumen?: string;
 }
 
 export interface ChatMessage {
@@ -21,7 +29,7 @@ export interface ChatMessage {
   status?: 'pending' | 'error' | 'aviso';
   /** Caso creado por la pregunta (también cuando quedó bloqueado). */
   casoId?: string;
+  progreso?: Progreso;
   consulta?: ResultadoConsulta;
-  /** Estado del análisis (Calidad, Detección, Normativo y Reportes) de ese caso. */
-  analisis?: { estado: 'corriendo' } | { estado: 'listo'; reporte: ReporteRef; resumen: string } | { estado: 'error'; mensaje: string };
+  reporte?: { ref: ReporteRef; resumen: string };
 }

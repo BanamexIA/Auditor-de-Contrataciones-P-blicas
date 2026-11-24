@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Icon } from '../../components/Icon';
-import type { ReporteRef, Usuario } from '../../types/auditor';
+import type { EstadoCaso, ReporteRef, Usuario } from '../../types/auditor';
+import type { Progreso } from '../../types/chat';
 import { MessageText } from './MessageText';
 import { ResultTable } from './ResultTable';
 import { useChat } from './useChat';
@@ -12,6 +13,37 @@ interface ChatPanelProps {
   onLogout?: () => void;
 }
 
+/** Etapas del orquestador, en orden, con el estado del caso que deja cada una al terminar. */
+const ETAPAS: { estado: EstadoCaso; nombre: string }[] = [
+  { estado: 'consultado', nombre: 'Consulta: pregunta → SQL de solo lectura' },
+  { estado: 'detectado', nombre: 'Calidad y detección de señales' },
+  { estado: 'normado', nombre: 'Normativo: normas vigentes (RAG)' },
+  { estado: 'reportado', nombre: 'Reporte verificado' },
+];
+const ORDEN: EstadoCaso[] = ['recibido', 'consultado', 'detectado', 'normado', 'reportado', 'en_revision'];
+
+function Etapas({ progreso }: { progreso: Progreso }) {
+  const hecho = ORDEN.indexOf(progreso.estado);
+  return (
+    <div className="etapas">
+      <ol>
+        {ETAPAS.map((etapa, i) => {
+          const indice = ORDEN.indexOf(etapa.estado);
+          const clase = indice <= hecho ? 'hecha' : i === Math.max(0, hecho) ? 'actual' : '';
+          return (
+            <li key={etapa.estado} className={clase}>
+              {etapa.nombre}
+            </li>
+          );
+        })}
+      </ol>
+      <small>
+        El orquestador está trabajando… {progreso.segundos} s{progreso.resumen ? ` · ${progreso.resumen}` : ''}
+      </small>
+    </div>
+  );
+}
+
 /** Preguntas que el Agente Consulta contesta bien con los datos actuales. */
 const SUGERENCIAS = [
   'Lista hasta 10 contratos de 2026 con coincidencia en el listado 69-B',
@@ -20,9 +52,8 @@ const SUGERENCIAS = [
 ];
 
 export function ChatPanel({ usuario, reporteActivo, onOpenReporte, onLogout }: ChatPanelProps) {
-  const { messages, pending, send, analizar, cancel, reset } = useChat({ onReporte: onOpenReporte });
+  const { messages, pending, send, cancel, reset } = useChat({ onReporte: onOpenReporte });
   const [draft, setDraft] = useState('');
-  const [segundos, setSegundos] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -30,13 +61,6 @@ export function ChatPanel({ usuario, reporteActivo, onOpenReporte, onLogout }: C
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages]);
 
-  // El modelo corre en una laptop: puede tardar. Se muestra cuánto lleva.
-  useEffect(() => {
-    if (!pending) return;
-    setSegundos(0);
-    const t = window.setInterval(() => setSegundos((s) => s + 1), 1000);
-    return () => window.clearInterval(t);
-  }, [pending]);
 
   useEffect(() => {
     const el = inputRef.current;
@@ -58,8 +82,6 @@ export function ChatPanel({ usuario, reporteActivo, onOpenReporte, onLogout }: C
     }
   };
 
-  // Pregunta del usuario que originó cada respuesta (título del reporte).
-  const preguntaDe = (i: number) => messages[i - 1]?.content ?? 'Reporte';
 
   return (
     <section className="panel chat" aria-label="Conversación con el Agente Consulta">
@@ -89,7 +111,7 @@ export function ChatPanel({ usuario, reporteActivo, onOpenReporte, onLogout }: C
             <h2>¿Qué contratos quieres revisar?</h2>
             <p>
               Pregunta en español. El Agente Consulta genera un SQL de solo lectura sobre los datos de ComprasMX y del
-              listado 69-B, y después puedes analizar los contratos y generar el reporte de señales de riesgo.
+              listado 69-B; luego el orquestador revisa la calidad, detecta señales, busca la norma y genera el reporte.
             </p>
             <div className="suggestions">
               {SUGERENCIAS.map((s) => (
@@ -100,17 +122,18 @@ export function ChatPanel({ usuario, reporteActivo, onOpenReporte, onLogout }: C
             </div>
           </div>
         ) : (
-          messages.map((m, i) => (
+          messages.map((m) => (
             <article key={m.id} className={`message ${m.role} ${m.status ?? ''}`}>
               {m.status === 'pending' ? (
-                <div className="pending">
+                m.progreso ? (
+                  <Etapas progreso={m.progreso} />
+                ) : (
                   <div className="typing" aria-label="Generando respuesta">
                     <span />
                     <span />
                     <span />
                   </div>
-                  <small>El agente está consultando… {segundos} s</small>
-                </div>
+                )
               ) : (
                 <MessageText text={m.content} />
               )}
@@ -119,35 +142,29 @@ export function ChatPanel({ usuario, reporteActivo, onOpenReporte, onLogout }: C
 
               {m.consulta && (
                 <details className="sql">
-                  <summary>SQL generado · {m.consulta.modelo} en {m.consulta.equipo}</summary>
+                  <summary>
+                    SQL generado{m.consulta.modelo ? ` · ${m.consulta.modelo}` : ''}
+                    {m.consulta.equipo ? ` en ${m.consulta.equipo}` : ''}
+                  </summary>
                   <pre>{m.consulta.sql}</pre>
                 </details>
               )}
 
-              {m.consulta && m.consulta.totalFilas > 0 && !m.analisis && (
-                <button className="btn primary analizar" onClick={() => void analizar(m.id, m.consulta!.casoId, preguntaDe(i))}>
-                  <Icon name="sparkle" size={16} /> Analizar y generar reporte
-                </button>
-              )}
-              {m.analisis?.estado === 'corriendo' && (
-                <p className="analisis-estado">Revisando calidad, detectando señales y generando el reporte…</p>
-              )}
-              {m.analisis?.estado === 'error' && <p className="analisis-estado error">{m.analisis.mensaje}</p>}
-              {m.analisis?.estado === 'listo' && (
+              {m.reporte && (
                 <button
-                  className={`report-card ${reporteActivo?.casoId === m.analisis.reporte.casoId ? 'active' : ''}`}
-                  onClick={() => m.analisis?.estado === 'listo' && onOpenReporte(m.analisis.reporte)}
+                  className={`report-card ${reporteActivo?.casoId === m.reporte.ref.casoId ? 'active' : ''}`}
+                  onClick={() => m.reporte && onOpenReporte(m.reporte.ref)}
                 >
                   <span className="report-card-icon">
                     <Icon name="file" size={20} />
                   </span>
                   <span className="report-card-body">
-                    <strong>Reporte v{m.analisis.reporte.version}</strong>
-                    <small>{m.analisis.resumen}</small>
+                    <strong>Reporte v{m.reporte.ref.version}</strong>
+                    <small>{m.reporte.resumen || 'Abrir en el visor'}</small>
                   </span>
                 </button>
               )}
-              {m.casoId && m.status !== 'pending' && <small className="caso-id">Caso {m.casoId}</small>}
+              {m.casoId && <small className="caso-id">Caso {m.casoId}</small>}
             </article>
           ))
         )}

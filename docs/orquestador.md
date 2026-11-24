@@ -62,7 +62,7 @@ bloqueo (y un evento `error` en la bitácora). Un nodo nunca deja el caso a medi
 ## 4. Cómo se usa
 
 ```powershell
-# Instalar LangGraph en el backend (ya está en backend/requirements.txt)
+# Instalar LangGraph en el backend (ya está en backend/requirements.txt, fijado en 1.2.24)
 docker compose build backend
 
 # Desde la terminal, igual que el demo
@@ -72,6 +72,8 @@ docker compose exec backend python -m backend.orquestador --dibujar   # el grafo
 
 # Desde el front
 POST /casos/<id>/orquestar     -> 202, y el front sigue /casos/<id> y su bitácora
+     {"narrativa_llm": false}  -> reporte con narrativas de respaldo (lo que usa el front)
+GET  /casos/<id>/resultados    -> filas de la consulta, para la tabla
 ```
 
 Límites (variables de entorno, opcionales):
@@ -108,6 +110,12 @@ python -m pytest tests/test_orquestador.py -v
   Por ahora los avisos se guardan como `error` con `tipo: "resultado_parcial"` (y
   `tipo: "contenido_sospechoso"` para O6). Si prefieren un tipo propio, hay que agregarlo al
   contrato 5, a `bitacora.py` y a `11_audit_bitacora.sql`.
+- **`entregar` no revisa el límite de tiempo** (ajuste del 24 nov). Solo corre si el reporte ya se
+  guardó; antes, un Agente Reportes lento dejaba el caso `bloqueado` con el reporte terminado.
+- **Búsquedas normativas fallidas: un solo evento** `error` con el conteo (`busquedas_fallidas`),
+  no uno por señal.
+- **Cada caso calcula sus embeddings en su propia laptop** (`recuperador_para`), sin escribir
+  `OLLAMA_EMBED_BASE_URL` en el entorno, que es compartido por todos los casos del proceso.
 - **El límite de tiempo no corta un nodo a la mitad.** Python no puede matar un hilo; el corte
   real dentro de un nodo lo da `LLM_TIMEOUT_S` por llamada. Si el Agente Reportes hace muchas
   llamadas con la laptop lenta, puede pasar el límite y se notará hasta el siguiente nodo.

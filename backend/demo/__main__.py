@@ -112,10 +112,10 @@ def _recuperador(agente_url: str | None, registrar):
                             "mensaje": "RAG omitido: no hay laptop para calcular embeddings."})
         return None
     try:
-        from agente_deteccion.normativo import RecuperadorPgvector
+        from backend.orquestador.dependencias import recuperador_para
         from eval.run_benchmark import connect_agent_ro
-        os.environ.setdefault("OLLAMA_EMBED_BASE_URL", agente_url)
-        base = RecuperadorPgvector(conn=connect_agent_ro(dict_rows=True))
+        base = recuperador_para({"url": agente_url} if agente_url else None,
+                                connect_agent_ro(dict_rows=True))
     except Exception as exc:
         registrar("error", {"tipo": type(exc).__name__, "mensaje": f"RAG no disponible: {exc}"[:300]})
         return None

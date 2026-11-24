@@ -424,3 +424,56 @@ details.sql pre {
 .login-card .link {
   align-self: center;
 }
+
+/* ---------- avance del orquestador ---------- */
+.etapas {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--text-muted);
+}
+
+.etapas ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.etapas li {
+  padding-left: 22px;
+  position: relative;
+}
+
+.etapas li::before {
+  content: '○';
+  position: absolute;
+  left: 2px;
+}
+
+.etapas li.hecha {
+  color: var(--text);
+}
+
+.etapas li.hecha::before {
+  content: '✓';
+  color: var(--ok);
+}
+
+.etapas li.actual {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.etapas li.actual::before {
+  content: '●';
+  animation: latido 1.2s ease-in-out infinite;
+}
+
+@keyframes latido {
+  50% {
+    opacity: 0.3;
+  }
+}

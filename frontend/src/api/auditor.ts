@@ -2,6 +2,8 @@
 import type {
   Caso,
   Decision,
+  EventoBitacora,
+  Fila,
   RespuestaAnalisis,
   RespuestaPregunta,
   Senal,
@@ -42,6 +44,35 @@ export const auth = {
 };
 
 export const auditor = {
+  // ---- orquestador real (LangGraph): crear el caso, lanzarlo y seguir su avance ----
+  crearCaso(solicitud: string) {
+    return apiJson<Caso>('/casos', { method: 'POST', body: { solicitud } });
+  },
+
+  /** 202 inmediato; el grafo corre en el backend. narrativaLlm=false: reporte en segundos. */
+  orquestar(casoId: string, narrativaLlm = false) {
+    return apiJson<{ caso_id: string }>(`/casos/${enc(casoId)}/orquestar`, {
+      method: 'POST',
+      body: { narrativa_llm: narrativaLlm },
+    });
+  },
+
+  async bitacora(casoId: string): Promise<EventoBitacora[]> {
+    return (await apiJson<{ eventos: EventoBitacora[] }>(`/casos/${enc(casoId)}/bitacora`)).eventos;
+  },
+
+  /** Filas de la consulta del caso (el backend re-ejecuta su SQL en solo lectura). */
+  resultados(casoId: string) {
+    return apiJson<{ sql: string; supuestos: string[]; total_filas: number; filas: Fila[] }>(
+      `/casos/${enc(casoId)}/resultados`,
+    );
+  },
+
+  async reportes(casoId: string): Promise<{ version: number }[]> {
+    return (await apiJson<{ reportes: { version: number }[] }>(`/casos/${enc(casoId)}/reportes`)).reportes;
+  },
+
+  // ---- demo (se queda mientras alguien lo use; el front ya va por el orquestador) ----
   preguntar(pregunta: string, signal?: AbortSignal) {
     return apiJson<RespuestaPregunta>('/demo/preguntar', { method: 'POST', body: { pregunta }, signal });
   },
