@@ -1,6 +1,8 @@
 """Autenticación de la API (docs/contratos/autenticacion.md).
 
 - ``POST /auth/login`` cambia usuario y contraseña por un token firmado (8 h).
+- Con Cognito configurado (``backend/usuarios/cognito.py``) también se acepta el access token
+  de Cognito; el rol y si el usuario está activo siguen saliendo de ``audit.usuarios``.
 - Todas las demás rutas exigen ``Authorization: Bearer <token>``, salvo
   ``/health``, ``/health/db`` y la descarga de un reporte con firma temporal.
 - Si el usuario se da de baja, su token deja de servir en la siguiente petición.
@@ -18,6 +20,7 @@ from typing import Any, Callable
 
 from flask import Blueprint, Flask, current_app, g, jsonify, request
 
+from backend.usuarios.cognito import ConfigCognito, VerificadorCognito
 from backend.usuarios.repositorio import RepositorioUsuarios
 from backend.usuarios.seguridad import (
     HASH_SEÑUELO,
@@ -40,6 +43,7 @@ class ConfigAuth:
     secreto: str
     repo: RepositorioUsuarios
     horas: float = 8.0
+    cognito: VerificadorCognito | None = None
 
 
 def _error(http: int, codigo: str, mensaje: str):
@@ -129,6 +133,9 @@ def yo():
     datos = g.get("usuario")
     if not datos:
         return _error(503, "auth_no_configurada", "La autenticación no está configurada.")
+    if g.get("via_cognito"):
+        # Con Cognito no pasa por /auth/login: el front llama a /auth/yo al entrar.
+        _config().repo.registrar_acceso(datos["usuario"])
     return jsonify(usuario={k: datos[k] for k in ("usuario", "nombre", "rol")})
 
 
@@ -149,32 +156,57 @@ def _autenticar():
     encabezado = request.headers.get("Authorization", "")
     if not encabezado.startswith("Bearer "):
         return _error(401, "no_autenticado", "Inicia sesión: falta 'Authorization: Bearer <token>'.")
+    token = encabezado[len("Bearer "):].strip()
+    via_cognito = cfg.cognito is not None and VerificadorCognito.parece_jwt(token)
     try:
-        datos = leer_token(cfg.secreto, encabezado[len("Bearer "):].strip())
+        if via_cognito:
+            identidad = cfg.cognito.identidad(token)
+            fila = (cfg.repo.activo_por_email(identidad.email) if identidad.email
+                    else cfg.repo.activo(identidad.usuario))
+        else:
+            fila = cfg.repo.activo(leer_token(cfg.secreto, token)["sub"])
     except TokenInvalido as exc:
         return _error(401, "no_autenticado", f"{exc} Vuelve a iniciar sesión.")
-    fila = cfg.repo.activo(datos["sub"])
     if fila is None:
+        if via_cognito:
+            return _error(401, "no_autenticado",
+                          f"Tu cuenta del equipo ({identidad.descripcion}) no está dada de alta en el "
+                          "sistema o fue dada de baja. Pide al administrador que te registre.")
         return _error(401, "no_autenticado", "El usuario ya no está activo.")
     g.usuario = fila  # el rol vigente es el de la BD, no el del token
+    g.via_cognito = via_cognito
     return None
 
 
-def configurar_auth(app: Flask, repo: RepositorioUsuarios | None, secreto: str | None = None) -> None:
-    """Activa la autenticación si hay secreto y repositorio; si no, avisa en el log."""
+def configurar_auth(app: Flask, repo: RepositorioUsuarios | None, secreto: str | None = None,
+                    cognito: VerificadorCognito | None = None) -> None:
+    """Activa la autenticación si hay secreto y repositorio; si no, avisa en el log.
+
+    Cognito es opcional y se suma al login local (no lo reemplaza). Requiere AUTH_SECRET igual,
+    porque las descargas firmadas de reportes usan ese secreto.
+    """
     secreto = secreto if secreto is not None else os.environ.get("AUTH_SECRET", "")
+    if cognito is None:
+        config_cognito = ConfigCognito.desde_entorno()
+        cognito = VerificadorCognito(config_cognito) if config_cognito else None
     if not secreto or repo is None:
         app.extensions["auth"] = None
         app.logger.warning("AUTENTICACIÓN DESACTIVADA: falta AUTH_SECRET. Solo para desarrollo.")
+        if cognito is not None:
+            app.logger.warning("Cognito configurado pero ignorado: la autenticación está desactivada.")
     else:
         if len(secreto) < 32:
             raise RuntimeError("AUTH_SECRET debe tener al menos 32 caracteres.")
         horas = float(os.environ.get("AUTH_TOKEN_HORAS", "8") or 8)
-        app.extensions["auth"] = ConfigAuth(secreto=secreto, repo=repo, horas=horas)
+        app.extensions["auth"] = ConfigAuth(secreto=secreto, repo=repo, horas=horas, cognito=cognito)
     app.extensions["auth_limite"] = _LimiteIntentos()
     app.before_request(_autenticar)
     app.register_blueprint(bp)
 
 
 def info_auth() -> dict[str, Any]:
-    return {"auth": "activa" if _config() else "desactivada"}
+    cfg = _config()
+    info: dict[str, Any] = {"auth": "activa" if cfg else "desactivada"}
+    if cfg and cfg.cognito:
+        info["cognito"] = cfg.cognito.config.publico()
+    return info

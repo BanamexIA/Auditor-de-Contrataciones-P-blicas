@@ -67,3 +67,4 @@ SELECT format(
 \ir /opt/etl/sql/17_revocar_audit_etl.sql
 \ir /opt/etl/sql/18_audit_usuarios.sql
 \ir /opt/etl/sql/19_bitacora_calidad.sql
+\ir /opt/etl/sql/20_usuarios_email.sql

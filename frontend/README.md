@@ -31,6 +31,9 @@ npm run dev                      # http://localhost:5173
 | EC2 | `http://localhost:15000` | Abrir el túnel: `ssh -i "$env:USERPROFILE\.ssh\auditor_ec2" -N -L 15000:127.0.0.1:5000 ubuntu@auditor-ec2` |
 
 El inicio de sesión usa los usuarios del backend (`python -m backend.usuarios alta ...`).
+Si el backend tiene Cognito configurado, aparece el botón «Entrar con la cuenta del equipo»
+(Authorization Code + PKCE con `react-oidc-context`); la configuración se lee de `GET /health` y
+el usuario de Cognito también debe estar dado de alta en el backend. Ver [docs/guia-cognito.md](../docs/guia-cognito.md).
 Si el backend no tiene `AUTH_SECRET` (solo en desarrollo), la app no pide sesión.
 
 ## Qué endpoints usa

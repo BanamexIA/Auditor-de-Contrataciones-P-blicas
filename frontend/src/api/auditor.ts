@@ -7,15 +7,20 @@ import type {
   Senal,
   Usuario,
 } from '../types/auditor';
+import type { CognitoPublico } from '../features/auth/cognito';
 import { apiBytes, apiJson, session } from './client';
 
 const enc = encodeURIComponent;
 
 export const auth = {
+  /** Estado de la autenticación del backend: si pide sesión y si acepta Cognito. */
+  salud() {
+    return apiJson<{ auth?: string; cognito?: CognitoPublico }>('/health');
+  },
+
   /** Si el backend no tiene AUTH_SECRET (solo desarrollo), no pide sesión. */
   async requiereSesion(): Promise<boolean> {
-    const salud = await apiJson<{ auth?: string }>('/health');
-    return salud.auth === 'activa';
+    return (await auth.salud()).auth === 'activa';
   },
 
   async login(usuario: string, contrasena: string): Promise<Usuario> {

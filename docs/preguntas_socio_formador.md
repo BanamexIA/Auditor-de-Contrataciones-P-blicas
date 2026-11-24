@@ -8,6 +8,8 @@ del pipeline; sí limitan la interpretación analítica.
    usar en análisis? Si viene vacío, ¿se debe conservar nulo o usar
    `monto_sin_imp_maximo`? Hasta tener respuesta, no interpretar `importe` como
    gasto ejecutado o pagado.
+
+   R: 
 2. **Tipos de contrato:** ¿son semánticamente equivalentes los catálogos
    histórico `contract_type` y ComprasMX `tipo_de_contrato`? Si no, deben
    analizarse por separado.

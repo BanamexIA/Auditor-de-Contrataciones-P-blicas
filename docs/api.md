@@ -137,7 +137,10 @@ solo se avanza al siguiente, bloquear exige `motivo`, desbloquear regresa a
 
 ## `GET /health`
 
-**200** `{"status": "ok"}`. No toca la base.
+**200** `{"status": "ok", "auth": "activa"}`. No toca la base. `auth` es `activa` o
+`desactivada` (sin `AUTH_SECRET`, solo desarrollo). Si Cognito está configurado agrega
+`"cognito": {"authority", "client_id", "dominio"}` (datos públicos) para que el front sepa a dónde
+redirigir; ver [guia-cognito.md](guia-cognito.md).
 
 ## `GET /health/db`
 

@@ -56,6 +56,7 @@ def create_app(
     http_agentes: ClienteHttp | None = None,
     repositorio_usuarios: RepositorioUsuarios | None = None,
     auth_secreto: str | None = None,
+    cognito=None,
 ) -> Flask:
     app = Flask(__name__)
     app.json.ensure_ascii = False
@@ -96,7 +97,7 @@ def create_app(
         return jsonify(status="ok", database="connected")
 
     configurar_cors(app)  # antes que la autenticación: responde el preflight OPTIONS
-    configurar_auth(app, repositorio_usuarios, auth_secreto)
+    configurar_auth(app, repositorio_usuarios, auth_secreto, cognito)
     app.register_blueprint(casos_bp)
     app.register_blueprint(agentes_bp)
     app.register_blueprint(demo_bp)

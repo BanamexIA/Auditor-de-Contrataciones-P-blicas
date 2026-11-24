@@ -34,6 +34,23 @@ iframe.src = url.startsWith("http") ? url : `/api${url}`;              // S3 o b
 El enlace dura 5 minutos y solo sirve para ese reporte; pide uno nuevo cada vez
 que lo muestres.
 
+## Cognito (opcional, desde el 23 nov 2026)
+
+Con `COGNITO_REGION`, `COGNITO_USER_POOL_ID` y `COGNITO_CLIENT_ID` la API también acepta tokens
+de Amazon Cognito (`Authorization: Bearer <token>`), además del token local.
+Detalle y pasos en [../guia-cognito.md](../guia-cognito.md).
+
+- El backend verifica siempre la firma (RS256, JWKS del pool), `iss` y `exp`. Además:
+  - **ID token** (lo que manda el front): `aud` = app client y `email_verified`. Se busca por
+    **correo** en `audit.usuarios.email` (migración 20). El pool inicia sesión con correo, así que
+    el `username` de Cognito es un UUID y no sirve para la bitácora.
+  - **Access token**: `client_id` = app client; se busca por `username` en `audit.usuarios.usuario`.
+- Cognito solo identifica. Si no hay usuario activo con ese correo (o username) →
+  `401 no_autenticado`, con el correo recibido en el mensaje.
+- El rol sale de `audit.usuarios`, nunca del token ni de grupos de Cognito.
+- `GET /auth/yo` con un token de Cognito actualiza `ultimo_acceso` (no hay `/auth/login`).
+- El login local sigue funcionando; las descargas firmadas siguen usando `AUTH_SECRET`.
+
 ## Seguridad
 
 | Medida | Detalle |
@@ -54,6 +71,8 @@ sudo docker compose exec backend python -m backend.usuarios listar
 sudo docker compose exec -it backend python -m backend.usuarios contrasena --usuario ana
 sudo docker compose exec backend python -m backend.usuarios rol --usuario ana --rol admin
 sudo docker compose exec backend python -m backend.usuarios baja --usuario ana
+# Cognito: correo con el que la persona entra (también: alta ... --email ana@correo.com)
+sudo docker compose exec backend python -m backend.usuarios correo --usuario ana --email ana@correo.com
 ```
 
 `alta` y `contrasena` piden la contraseña sin mostrarla (por eso `-it`). La

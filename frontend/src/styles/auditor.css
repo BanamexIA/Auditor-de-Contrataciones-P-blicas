@@ -414,3 +414,13 @@ details.sql pre {
 .senal-error {
   margin-top: 8px;
 }
+
+.login-separador {
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.login-card .link {
+  align-self: center;
+}
