@@ -7,10 +7,12 @@ interface LoginProps {
   aviso?: string | null;
   /** Solo si el backend tiene Cognito: redirige a la página de inicio de sesión de Cognito. */
   onEntrarCognito?: () => void;
+  /** Cierra la sesión de Cognito para que el siguiente «Entrar» pida otra cuenta. */
+  onCambiarCuenta?: () => void;
 }
 
 /** Inicio de sesión: cuenta del equipo (Cognito) si existe; usuario y contraseña locales como respaldo. */
-export function Login({ onLogin, aviso, onEntrarCognito }: LoginProps) {
+export function Login({ onLogin, aviso, onEntrarCognito, onCambiarCuenta }: LoginProps) {
   const [usuario, setUsuario] = useState('');
   const [contrasena, setContrasena] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -46,6 +48,11 @@ export function Login({ onLogin, aviso, onEntrarCognito }: LoginProps) {
             <button className="btn primary" type="button" onClick={onEntrarCognito}>
               Entrar con la cuenta del equipo
             </button>
+            {onCambiarCuenta && (
+              <button className="link" type="button" onClick={onCambiarCuenta} title="Cierra la sesión de Cognito en este navegador">
+                Entrar con otra cuenta
+              </button>
+            )}
             {!local && (
               <button className="link" type="button" onClick={() => setLocal(true)}>
                 Usar usuario y contraseña locales

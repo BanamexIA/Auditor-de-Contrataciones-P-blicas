@@ -14,6 +14,22 @@ from typing import Any, Callable
 from backend.orquestador.nodos import Dependencias
 
 
+def recuperador_para(agente: dict | None, conn):
+    """RAG cuyos embeddings se calculan en la laptop del caso.
+
+    No escribe OLLAMA_EMBED_BASE_URL en el entorno: es compartido por todo el proceso, y con dos
+    casos a la vez uno usaría la laptop del otro. Cada caso arma su propio cliente.
+    """
+    from agente_deteccion.normativo import RecuperadorPgvector
+    from rag.core import OllamaEmbeddingClient, ollama_settings
+
+    base = RecuperadorPgvector(conn=conn)  # toma el modelo de embeddings y la URL por defecto
+    if agente:
+        _, modelo = ollama_settings()
+        base.cliente = OllamaEmbeddingClient(agente["url"], modelo)
+    return base
+
+
 def dependencias_reales(repo, repo_agentes, log: Callable[[str], None] | None = None,
                         modelo: str | None = None) -> Dependencias:
     from backend.agentes.servicio import seleccionar_agente
@@ -46,10 +62,7 @@ def dependencias_reales(repo, repo_agentes, log: Callable[[str], None] | None = 
     def crear_recuperador(agente: dict | None):
         if not agente and not os.environ.get("OLLAMA_EMBED_BASE_URL"):
             raise RuntimeError("no hay laptop para calcular embeddings")
-        from agente_deteccion.normativo import RecuperadorPgvector
-        if agente:  # los embeddings se calculan en la misma laptop elegida para el caso
-            os.environ["OLLAMA_EMBED_BASE_URL"] = agente["url"]
-        base = RecuperadorPgvector(conn=connect_agent_ro(dict_rows=True))
+        base = recuperador_para(agente, connect_agent_ro(dict_rows=True))
 
         def recuperar(consulta, fecha, top_k):
             try:

@@ -1,6 +1,8 @@
 """Endpoint para que el front lance el orquestador sobre un caso.
 
 POST /casos/<caso_id>/orquestar  -> 202 {"caso_id", "estado": "recibido", "mensaje"}
+     cuerpo opcional: {"narrativa_llm": false} -> reporte con narrativas de respaldo (rápido)
+GET  /casos/<caso_id>/resultados -> filas de la consulta del caso (re-ejecuta su SQL, solo lectura)
 
 El caso tarda minutos (modelo local), así que el grafo corre en un hilo y el front sigue el avance
 con GET /casos/<id> y GET /casos/<id>/bitacora, igual que hoy. Los estados que va poniendo el
@@ -15,7 +17,7 @@ from __future__ import annotations
 
 import threading
 
-from flask import Blueprint, current_app, jsonify
+from flask import Blueprint, current_app, jsonify, request
 
 from backend.casos import estados as e
 from backend.casos.repositorio import CasoNoEncontrado
@@ -62,6 +64,9 @@ def orquestar(caso_id: str):
 
     app = current_app._get_current_object()
     deps = _deps(app)
+    cuerpo = request.get_json(silent=True) or {}
+    if isinstance(cuerpo.get("narrativa_llm"), bool):
+        deps.narrativa_llm = cuerpo["narrativa_llm"]
 
     def trabajo():
         try:
@@ -75,3 +80,48 @@ def orquestar(caso_id: str):
     app.extensions.get("lanzar_orquestador", _lanzar_hilo)(trabajo)
     return jsonify(caso_id=caso_id, estado=e.RECIBIDO,
                    mensaje="El orquestador empezó. Sigue el avance en /casos/<id> y su bitácora."), 202
+
+
+MAX_FILAS_RESULTADOS = 200
+
+
+def _ejecutar_solo_lectura(sql: str) -> list[dict]:
+    from eval.run_benchmark import execute_read_only  # agent_ro, solo lectura y con tiempo límite
+    return execute_read_only(sql)
+
+
+def _a_json(valor):
+    """Decimal -> número (montos); fechas y lo demás -> texto."""
+    from decimal import Decimal
+    return float(valor) if isinstance(valor, Decimal) else str(valor)
+
+
+@bp.get("/casos/<caso_id>/resultados")
+def resultados(caso_id: str):
+    """Filas que devolvió el Agente Consulta, para mostrarlas en el front.
+
+    No se guardan: se vuelve a ejecutar (con agent_ro) el SQL que quedó en la bitácora del caso,
+    así la tabla siempre sale de la misma consulta auditada.
+    """
+    import json
+
+    repo = current_app.extensions["repositorio_casos"]
+    try:
+        eventos = repo.listar_eventos(caso_id)
+    except CasoNoEncontrado:
+        return _error(404, "caso_no_encontrado", f"No existe el caso {caso_id}.")
+    ejecutado = next((ev["detalle"] for ev in reversed(eventos) if ev["evento"] == "sql_ejecutado"), None)
+    if not ejecutado or not ejecutado.get("sql"):
+        return _error(409, "sin_consulta", "El caso todavía no tiene una consulta ejecutada.")
+    supuestos = next((ev["detalle"].get("supuestos", []) for ev in reversed(eventos)
+                      if ev["evento"] == "sql_generado"), [])
+    ejecutar = current_app.extensions.get("ejecutar_solo_lectura", _ejecutar_solo_lectura)
+    try:
+        filas = ejecutar(ejecutado["sql"])
+    except Exception:
+        current_app.logger.exception("No se pudieron recuperar los resultados del caso %s", caso_id)
+        return _error(503, "resultados_no_disponibles",
+                      "No se pudo volver a ejecutar la consulta del caso. Intenta más tarde.")
+    filas = json.loads(json.dumps(filas, default=_a_json))
+    return jsonify(caso_id=caso_id, sql=ejecutado["sql"], supuestos=supuestos,
+                   total_filas=len(filas), filas=filas[:MAX_FILAS_RESULTADOS])

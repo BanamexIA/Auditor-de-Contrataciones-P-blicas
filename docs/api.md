@@ -30,6 +30,7 @@ cada endpoint están en [`docs/contratos/`](contratos/README.md).
 | `GET` | [`/casos/<id>/reportes/<version>/contenido`](#get-casosidreportesversioncontenido) | Bytes del reporte vía backend (visor PDF) | Front |
 | `GET` | [`/casos/<id>/telemetria`](#get-casosidtelemetria) | Tokens y latencia del modelo en el caso (B9) | Front, evaluación |
 | `POST` | [`/casos/<id>/orquestar`](#post-casosidorquestar) | Correr el orquestador (los 3 agentes) sobre un caso `recibido` | Front |
+| `GET` | [`/casos/<id>/resultados`](#get-casosidresultados) | Filas de la consulta del caso (re-ejecuta su SQL, solo lectura) | Front |
 | `POST` | [`/demo/preguntar`](#post-demopreguntar) | Demo: el Agente Consulta contesta una pregunta | Front de demo |
 | `POST` | [`/demo/casos/<id>/analizar`](#post-democasosidanalizar) | Demo: calidad, detección, normas y reporte de un caso consultado | Front |
 | `GET` | [`/agentes`](#get-agentes) | Laptops con Ollama registradas y su estado | Front, monitoreo |
@@ -325,7 +326,9 @@ Errores: `404 reporte_no_encontrado`, `500 reporte_corrupto`, `503 almacen_no_di
 Lanza el orquestador (LangGraph, ver [orquestador.md](orquestador.md)) sobre un caso en
 `recibido`. Corre en segundo plano y responde de inmediato; el front sigue el avance con
 `GET /casos/<id>` y su bitácora. El caso termina en `en_revision` o en `bloqueado` con el motivo.
-No recibe cuerpo.
+Cuerpo opcional: `{"narrativa_llm": false}` genera el reporte con las narrativas deterministas de
+respaldo (segundos en vez de una llamada al modelo por señal; señales, normas y cifras son las
+mismas). Sin cuerpo, el reporte se redacta con el modelo.
 
 ```json
 {"caso_id": "6f1c…", "estado": "recibido",
@@ -334,6 +337,20 @@ No recibe cuerpo.
 
 **202** · **404** `caso_no_encontrado` · **409** `transicion_invalida` (el caso no está en
 `recibido`) · **409** `en_curso` (el orquestador ya trabaja en ese caso).
+
+## `GET /casos/<id>/resultados`
+
+Las filas que devolvió el Agente Consulta, para mostrarlas en el front. No se guardan: se vuelve a
+ejecutar con `agent_ro` (solo lectura, tiempo límite) el SQL registrado en la bitácora del caso.
+
+```json
+{"caso_id": "6f1c…", "sql": "SELECT …", "supuestos": ["…"], "total_filas": 10,
+ "filas": [{"codigo_contrato": "C-2026-00023015", "importe": 306000.0, "fecha_inicio": "2026-04-14"}]}
+```
+
+Hasta 200 filas; los montos van como número y las fechas como texto.
+**200** · **404** `caso_no_encontrado` · **409** `sin_consulta` (aún no hay consulta ejecutada) ·
+**503** `resultados_no_disponibles`.
 
 ## `POST /demo/casos/<id>/analizar`
 
