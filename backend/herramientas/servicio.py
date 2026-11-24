@@ -31,7 +31,7 @@ MAX_TOP_K = 10
 SQL_CONTRATOS = """
 SELECT codigo_contrato AS id, proveedor, rfc, importe AS monto, moneda, institucion AS dependencia,
        tipo_procedimiento, tipo_procedimiento_norm, fecha_inicio AS fecha, fecha_fin, fuente,
-       fecha_inicio_estado, fecha_inicio_valida
+       fecha_inicio_estado, fecha_inicio_valida, ley
 FROM clean.contratos WHERE codigo_contrato = ANY(%s)"""
 SQL_COINCIDENCIAS = """
 SELECT codigo_contrato, rfc_exacto, nombre_normalizado_exacto, nivel_confianza, rfc,

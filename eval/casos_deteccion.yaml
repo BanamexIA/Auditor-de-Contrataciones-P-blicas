@@ -1,0 +1,657 @@
+# Casos de referencia del Agente de Detección (D7) para los escenarios 3, 4, 5 y 6.
+#
+# Los resultados esperados se calcularon ANTES de ejecutar el agente, a partir de las reglas del plan de trabajo
+# y de los criterios de diseño (campo `calculo` de cada caso). Los umbrales y niveles son PROVISIONALES hasta que el
+# socio formador los confirme (decisión 5 de AVANCE_2_PLAN.md): si cambian, cambian estos esperados.
+# Los valores del escenario 4 se calcularon con un script aparte (eval/calculo_independiente_montos.py) que no
+# importa el detector.
+#
+# Formato de cada caso:
+#   modo: ejecutar | ficha          base: valores por defecto que se mezclan en cada fila
+#   entrada: filas, listado_69b, coincidencias, prioridad_fuentes, parametros, empresa {rfc, nombre, desde, hasta}
+#   esperado:
+#     alcance: [códigos]            para esos códigos las señales obtenidas deben ser EXACTAMENTE las listadas
+#     senales: [{codigo, contratos_ids, estado, nivel, confianza, periodo, afectada_por_contradiccion,
+#                requiere_revision_humana, campos_faltantes, motivo_contiene, valores, valores_contiene}]
+#     excluidos / excluidos_total / contradicciones / contradicciones_total / contratos / calidad /
+#     concentracion / empresa / empresa_motivo_contiene / advertencias_contienen
+
+# ============================================================ ESCENARIO 3 · Coincidencia con el 69-B
+- id: e3_01
+  escenario: 3
+  titulo: Coincidencia exacta por RFC, situación Definitivo, con fecha de publicación
+  calculo: RFC igual al del listado -> confianza alta; situación Definitivo -> nivel alto; se muestra situación y fecha.
+  base: {moneda: MXN, fuente: ComprasMX 2026, dependencia: Dependencia A, tipo_procedimiento: Licitación pública, fecha: '2026-03-02'}
+  entrada:
+    filas:
+      - {id: C1, proveedor: Servicios Alfa SA de CV, rfc: SAL010101AAA, monto: 1000000}
+    listado_69b:
+      - {rfc: SAL010101AAA, nombre_del_contribuyente: SERVICIOS ALFA SA DE CV, situacion_del_contribuyente: Definitivo, fecha_publicacion: '2025-06-30'}
+  esperado:
+    alcance: [PROVEEDOR_LISTA_69B]
+    senales:
+      - codigo: PROVEEDOR_LISTA_69B
+        contratos_ids: [C1]
+        estado: evaluada
+        nivel: alto
+        confianza: alta
+        requiere_revision_humana: true
+        valores: {criterio_cruce: rfc_exacto, rfc: SAL010101AAA, situacion_vigente: Definitivo, fecha_publicacion: '2025-06-30', nota: null}
+
+- id: e3_02
+  escenario: 3
+  titulo: Coincidencia exacta por RFC con situación Presunto
+  calculo: RFC exacto -> confianza alta; Presunto no es definitivo ni favorable -> nivel medio.
+  base: {moneda: MXN, fuente: ComprasMX 2026, dependencia: Dependencia A, tipo_procedimiento: Licitación pública, fecha: '2026-03-02'}
+  entrada:
+    filas:
+      - {id: C1, proveedor: Presunta SA de CV, rfc: PRE020202BBB, monto: 500000}
+    listado_69b:
+      - {rfc: PRE020202BBB, nombre_del_contribuyente: PRESUNTA SA DE CV, situacion_del_contribuyente: Presunto, fecha_publicacion: '2025-08-01'}
+  esperado:
+    alcance: [PROVEEDOR_LISTA_69B]
+    senales:
+      - {codigo: PROVEEDOR_LISTA_69B, contratos_ids: [C1], estado: evaluada, nivel: medio, confianza: alta,
+         valores: {criterio_cruce: rfc_exacto, situacion_vigente: Presunto, fecha_publicacion: '2025-08-01'}}
+
+- id: e3_03
+  escenario: 3
+  titulo: Situaciones favorables (Desvirtuado, Sentencia favorable) quedan como informativas
+  calculo: RFC exacto -> confianza alta; una situación favorable no se presenta como riesgo alto -> nivel bajo.
+  base: {moneda: MXN, fuente: ComprasMX 2026, dependencia: Dependencia A, tipo_procedimiento: Licitación pública, fecha: '2026-03-02'}
+  entrada:
+    filas:
+      - {id: C1, proveedor: Desvirtuada SA de CV, rfc: DES030303CCC, monto: 100000}
+      - {id: C2, proveedor: Sentencia SA de CV, rfc: SEN040404DDD, monto: 200000}
+    listado_69b:
+      - {rfc: DES030303CCC, nombre_del_contribuyente: DESVIRTUADA SA DE CV, situacion_del_contribuyente: Desvirtuado, fecha_publicacion: '2024-05-10'}
+      - {rfc: SEN040404DDD, nombre_del_contribuyente: SENTENCIA SA DE CV, situacion_del_contribuyente: Sentencia favorable, fecha_publicacion: '2024-07-20'}
+  esperado:
+    alcance: [PROVEEDOR_LISTA_69B]
+    senales:
+      - {codigo: PROVEEDOR_LISTA_69B, contratos_ids: [C1], estado: evaluada, nivel: bajo, confianza: alta, valores: {situacion_vigente: Desvirtuado}}
+      - {codigo: PROVEEDOR_LISTA_69B, contratos_ids: [C2], estado: evaluada, nivel: bajo, confianza: alta, valores: {situacion_vigente: Sentencia favorable}}
+
+- id: e3_04
+  escenario: 3
+  titulo: Coincidencia solo por nombre (el contrato no trae RFC) es de baja confianza
+  calculo: Plan HU-04, coincidencia solo por nombre -> confianza baja; sin RFC exacto el nivel no pasa de bajo.
+  base: {moneda: MXN, fuente: ComprasMX 2026, dependencia: Dependencia A, tipo_procedimiento: Licitación pública, fecha: '2026-03-02'}
+  entrada:
+    filas:
+      - {id: C1, proveedor: Comercial Beta SA de CV, rfc: null, monto: 300000}
+    listado_69b:
+      - {rfc: BET040404DDD, nombre_del_contribuyente: COMERCIAL BETA SA DE CV, situacion_del_contribuyente: Presunto, fecha_publicacion: '2025-09-15'}
+  esperado:
+    alcance: [PROVEEDOR_LISTA_69B]
+    senales:
+      - codigo: PROVEEDOR_LISTA_69B
+        contratos_ids: [C1]
+        estado: evaluada
+        nivel: bajo
+        confianza: baja
+        valores: {criterio_cruce: nombre_normalizado, rfc: BET040404DDD, nombre_en_listado: COMERCIAL BETA SA DE CV, situacion_vigente: Presunto, fecha_publicacion: '2025-09-15', nota: null}
+
+- id: e3_05
+  escenario: 3
+  titulo: RFC válido que no está en el listado y nombre distinto -> sin señal
+  calculo: Ni el RFC ni el nombre aparecen en el listado -> no se genera ninguna señal 69-B (no se acusa por omisión).
+  base: {moneda: MXN, fuente: ComprasMX 2026, dependencia: Dependencia A, tipo_procedimiento: Licitación pública, fecha: '2026-03-02'}
+  entrada:
+    filas:
+      - {id: C1, proveedor: Proveedor Gamma SA de CV, rfc: GAM060606FFF, monto: 400000}
+    listado_69b:
+      - {rfc: SAL010101AAA, nombre_del_contribuyente: SERVICIOS ALFA SA DE CV, situacion_del_contribuyente: Definitivo, fecha_publicacion: '2025-06-30'}
+  esperado:
+    alcance: [PROVEEDOR_LISTA_69B]
+    senales: []
+
+- id: e3_06
+  escenario: 3
+  titulo: Contrato sin RFC y sin coincidencia por nombre -> no evaluable
+  calculo: Sin RFC válido no se puede cruzar con certeza y el nombre no coincide -> señal no_evaluable con campo faltante rfc.
+  base: {moneda: MXN, fuente: ComprasMX 2026, dependencia: Dependencia A, tipo_procedimiento: Licitación pública, fecha: '2026-03-02'}
+  entrada:
+    filas:
+      - {id: C1, proveedor: Proveedor Delta SA de CV, rfc: null, monto: 400000}
+    listado_69b:
+      - {rfc: SAL010101AAA, nombre_del_contribuyente: SERVICIOS ALFA SA DE CV, situacion_del_contribuyente: Definitivo, fecha_publicacion: '2025-06-30'}
+  esperado:
+    alcance: [PROVEEDOR_LISTA_69B]
+    senales:
+      - {codigo: PROVEEDOR_LISTA_69B, contratos_ids: [C1], estado: no_evaluable, campos_faltantes: [rfc], motivo_contiene: no tiene un RFC válido}
+    excluidos:
+      - {contrato_id: C1, motivo: sin RFC}
+
+- id: e3_07
+  escenario: 3
+  titulo: RFC genérico (público en general) no se cruza
+  calculo: XAXX010101000 es un RFC genérico, no identifica a un proveedor -> no válido, no evaluable y se declara como exclusión.
+  base: {moneda: MXN, fuente: ComprasMX 2026, dependencia: Dependencia A, tipo_procedimiento: Licitación pública, fecha: '2026-03-02'}
+  entrada:
+    filas:
+      - {id: C1, proveedor: Público en general, rfc: XAXX010101000, monto: 50000}
+    listado_69b:
+      - {rfc: SAL010101AAA, nombre_del_contribuyente: SERVICIOS ALFA SA DE CV, situacion_del_contribuyente: Definitivo, fecha_publicacion: '2025-06-30'}
+  esperado:
+    alcance: [PROVEEDOR_LISTA_69B]
+    senales:
+      - {codigo: PROVEEDOR_LISTA_69B, contratos_ids: [C1], estado: no_evaluable, campos_faltantes: [rfc]}
+    excluidos:
+      - {contrato_id: C1, motivo: RFC genérico}
+
+- id: e3_08
+  escenario: 3
+  titulo: Mismo nombre que el listado pero RFC válido distinto -> solo coincidencia por nombre, baja confianza
+  calculo: El RFC del contrato no es el del listado, así que no hay cruce exacto; el nombre sí coincide -> baja confianza (posible homónimo, lo decide una persona).
+  base: {moneda: MXN, fuente: ComprasMX 2026, dependencia: Dependencia A, tipo_procedimiento: Licitación pública, fecha: '2026-03-02'}
+  entrada:
+    filas:
+      - {id: C1, proveedor: Servicios Alfa SA de CV, rfc: OTR050505EEE, monto: 700000}
+    listado_69b:
+      - {rfc: SAL010101AAA, nombre_del_contribuyente: SERVICIOS ALFA SA DE CV, situacion_del_contribuyente: Definitivo, fecha_publicacion: '2025-06-30'}
+  esperado:
+    alcance: [PROVEEDOR_LISTA_69B]
+    senales:
+      - {codigo: PROVEEDOR_LISTA_69B, contratos_ids: [C1], estado: evaluada, nivel: bajo, confianza: baja, valores: {criterio_cruce: nombre_normalizado, rfc: SAL010101AAA}}
+
+- id: e3_09
+  escenario: 3
+  titulo: Coincidencia sin situación ni fecha (como llega hoy desde la base) lo declara
+  calculo: Con RFC exacto pero sin situación publicada -> nivel medio (desconocida) y la nota dice exactamente qué falta; nada se inventa.
+  base: {moneda: MXN, fuente: ComprasMX 2026, dependencia: Dependencia A, tipo_procedimiento: Licitación pública, fecha: '2026-03-02'}
+  entrada:
+    filas:
+      - {id: C1, proveedor: Servicios Alfa SA de CV, rfc: SAL010101AAA, monto: 1000000}
+    coincidencias:
+      - {codigo_contrato: C1, rfc_exacto: true, nombre_normalizado_exacto: true, rfc: SAL010101AAA, nombre_del_contribuyente: SERVICIOS ALFA SA DE CV, situacion: null, fecha_publicacion: null}
+  esperado:
+    alcance: [PROVEEDOR_LISTA_69B]
+    senales:
+      - codigo: PROVEEDOR_LISTA_69B
+        contratos_ids: [C1]
+        estado: evaluada
+        nivel: medio
+        confianza: alta
+        valores: {situacion_vigente: null, fecha_publicacion: null}
+        valores_contiene: {nota: situación vigente}
+
+# ============================================================ ESCENARIO 4 · Monto atípico
+- id: e4_01
+  escenario: 4
+  titulo: Marca solo los dos atípicos (uno alto, uno bajo) de un grupo de 10 licitaciones
+  calculo: >
+    Grupo licitacion_publica, 10 montos en pesos. Mediana de los montos 1,025,000. Sobre ln(monto): MAD 0.0955,
+    escala MAD/0.6745, umbral = mediana ± 3.5 escalas -> [624,189.99 ; 1,682,180.14]. Solo 2,000 y 45,000,000 quedan fuera.
+    z = -44.05 y 26.71 (|z| >= 7 -> nivel alto). Con 10 comparables la confianza es media.
+  base: {moneda: MXN, fuente: ComprasMX 2026, tipo_procedimiento: Licitación pública, rfc: null, fecha: '2026-03-02'}
+  entrada:
+    filas:
+      - {id: C01, proveedor: Proveedor 01, dependencia: Dep 1, monto: 2000}
+      - {id: C02, proveedor: Proveedor 02, dependencia: Dep 1, monto: 900000}
+      - {id: C03, proveedor: Proveedor 03, dependencia: Dep 1, monto: 950000}
+      - {id: C04, proveedor: Proveedor 04, dependencia: Dep 2, monto: 1000000}
+      - {id: C05, proveedor: Proveedor 05, dependencia: Dep 2, monto: 1000000}
+      - {id: C06, proveedor: Proveedor 06, dependencia: Dep 2, monto: 1050000}
+      - {id: C07, proveedor: Proveedor 07, dependencia: Dep 3, monto: 1100000}
+      - {id: C08, proveedor: Proveedor 08, dependencia: Dep 3, monto: 1150000}
+      - {id: C09, proveedor: Proveedor 09, dependencia: Dep 3, monto: 1200000}
+      - {id: C10, proveedor: Proveedor 10, dependencia: Dep 3, monto: 45000000}
+  esperado:
+    tolerancia: 0.001
+    alcance: [MONTO_ATIPICO]
+    senales:
+      - codigo: MONTO_ATIPICO
+        contratos_ids: [C10]
+        estado: evaluada
+        nivel: alto
+        confianza: media
+        requiere_revision_humana: true
+        valores: {direccion: alto, monto: 45000000.0, mediana_grupo: 1025000.0, umbral_inferior: 624189.99, umbral_superior: 1682180.14, puntaje_z: 26.71, tamano_grupo: 10, grupo: {tipo_proc_norm: licitacion_publica}}
+        valores_contiene: {metodo: mediana y MAD}
+      - codigo: MONTO_ATIPICO
+        contratos_ids: [C01]
+        estado: evaluada
+        nivel: alto
+        confianza: media
+        valores: {direccion: bajo, monto: 2000.0, mediana_grupo: 1025000.0, umbral_inferior: 624189.99, umbral_superior: 1682180.14, puntaje_z: -44.05, tamano_grupo: 10}
+
+- id: e4_02
+  escenario: 4
+  titulo: Grupo homogéneo -> no se marca nada
+  calculo: >
+    10 montos entre 950,000 y 1,150,000. Mediana 1,035,000; MAD (ln) 0.0444; umbral [821,942.52 ; 1,303,010.82].
+    Todos quedan dentro -> cero señales de monto atípico (y el grupo sí se evaluó, así que tampoco hay no_evaluable).
+  base: {moneda: MXN, fuente: ComprasMX 2026, tipo_procedimiento: Licitación pública, rfc: null, fecha: '2026-03-02', dependencia: Dep 1}
+  entrada:
+    filas:
+      - {id: C01, proveedor: Proveedor 01, monto: 950000}
+      - {id: C02, proveedor: Proveedor 02, monto: 980000}
+      - {id: C03, proveedor: Proveedor 03, monto: 1000000}
+      - {id: C04, proveedor: Proveedor 04, monto: 1000000}
+      - {id: C05, proveedor: Proveedor 05, monto: 1020000}
+      - {id: C06, proveedor: Proveedor 06, monto: 1050000}
+      - {id: C07, proveedor: Proveedor 07, monto: 1070000}
+      - {id: C08, proveedor: Proveedor 08, monto: 1100000}
+      - {id: C09, proveedor: Proveedor 09, monto: 1120000}
+      - {id: C10, proveedor: Proveedor 10, monto: 1150000}
+  esperado:
+    alcance: [MONTO_ATIPICO]
+    senales: []
+
+- id: e4_03
+  escenario: 4
+  titulo: Grupo de comparación demasiado chico -> no evaluable, no se estima
+  calculo: Solo 4 contratos comparables; el mínimo es 5 -> una señal no_evaluable que lo explica, sin marcar ningún contrato.
+  base: {moneda: MXN, fuente: ComprasMX 2026, tipo_procedimiento: Licitación pública, rfc: null, fecha: '2026-03-02', dependencia: Dep 1}
+  entrada:
+    filas:
+      - {id: C01, proveedor: Proveedor 01, monto: 1000000}
+      - {id: C02, proveedor: Proveedor 02, monto: 1100000}
+      - {id: C03, proveedor: Proveedor 03, monto: 900000}
+      - {id: C04, proveedor: Proveedor 04, monto: 90000000}
+  esperado:
+    alcance: [MONTO_ATIPICO]
+    senales:
+      - {codigo: MONTO_ATIPICO, contratos_ids: [C01, C02, C03, C04], estado: no_evaluable, campos_faltantes: [grupo_comparable_suficiente], motivo_contiene: al menos 5}
+
+- id: e4_04
+  escenario: 4
+  titulo: Grupo con MAD = 0 usa el rango intercuartil
+  calculo: >
+    6 contratos de 1,000,000 y uno de 5,000,000. La MAD es 0, así que se usa el rango intercuartil: Q1 = Q3 = 1,000,000, RIC = 0,
+    umbral [1,000,000 ; 1,000,000]. Solo 5,000,000 queda fuera. Sin puntaje z el nivel es medio; con 7 comparables la confianza es baja.
+  base: {moneda: MXN, fuente: ComprasMX 2026, tipo_procedimiento: Licitación pública, rfc: null, fecha: '2026-03-02', dependencia: Dep 1}
+  entrada:
+    filas:
+      - {id: C1, proveedor: Proveedor 1, monto: 1000000}
+      - {id: C2, proveedor: Proveedor 2, monto: 1000000}
+      - {id: C3, proveedor: Proveedor 3, monto: 1000000}
+      - {id: C4, proveedor: Proveedor 4, monto: 1000000}
+      - {id: C5, proveedor: Proveedor 5, monto: 1000000}
+      - {id: C6, proveedor: Proveedor 6, monto: 1000000}
+      - {id: C7, proveedor: Proveedor 7, monto: 5000000}
+  esperado:
+    tolerancia: 0.001
+    alcance: [MONTO_ATIPICO]
+    senales:
+      - codigo: MONTO_ATIPICO
+        contratos_ids: [C7]
+        estado: evaluada
+        nivel: medio
+        confianza: baja
+        valores: {direccion: alto, mediana_grupo: 1000000.0, umbral_superior: 1000000.0, umbral_inferior: 1000000.0, puntaje_z: null, tamano_grupo: 7}
+        valores_contiene: {metodo: rango intercuartil}
+
+- id: e4_05
+  escenario: 4
+  titulo: Ficha de empresa - el atípico de la empresa se reporta; el atípico de otra empresa solo sirve de comparación
+  calculo: >
+    Grupo licitacion_publica con 9 contratos en pesos: 1 de la empresa (90,000,000), 1 atípico de otra empresa (500,000,000) y 7 normales.
+    Mediana 1,050,000; MAD (ln) 0.1001; umbral [624,661.24 ; 1,764,956.64]. Ambos quedan fuera, pero la ficha solo reporta el de la empresa.
+    Con 9 comparables (< 10) la confianza es baja.
+  modo: ficha
+  base: {moneda: MXN, fuente: ComprasMX 2026, tipo_procedimiento: Licitación pública, fecha: '2026-04-01', dependencia: Dep 1}
+  entrada:
+    empresa: {rfc: ALF010101AAA, nombre: Alfa Constructora SA de CV}
+    filas:
+      - {id: A1, proveedor: Alfa Constructora SA de CV, rfc: ALF010101AAA, monto: 90000000}
+      - {id: L1, proveedor: Otra Uno, rfc: null, monto: 1000000}
+      - {id: L2, proveedor: Otra Dos, rfc: null, monto: 1100000}
+      - {id: L3, proveedor: Otra Tres, rfc: null, monto: 900000}
+      - {id: L4, proveedor: Otra Cuatro, rfc: null, monto: 1050000}
+      - {id: L5, proveedor: Otra Cinco, rfc: null, monto: 950000}
+      - {id: L6, proveedor: Otra Seis, rfc: null, monto: 1200000}
+      - {id: L7, proveedor: Otra Siete, rfc: null, monto: 1000000}
+      - {id: L99, proveedor: Otra Noventa, rfc: null, monto: 500000000}
+  esperado:
+    tolerancia: 0.001
+    alcance: [MONTO_ATIPICO]
+    senales:
+      - codigo: MONTO_ATIPICO
+        contratos_ids: [A1]
+        estado: evaluada
+        nivel: alto
+        confianza: baja
+        valores: {direccion: alto, mediana_grupo: 1050000.0, umbral_inferior: 624661.24, umbral_superior: 1764956.64, tamano_grupo: 9}
+    empresa:
+      identificacion: {tipo: rfc, contratos_por_rfc: 1, contratos_por_nombre: 0}
+      resumen: {num_contratos: 1}
+      sin_datos: false
+
+# ============================================================ ESCENARIO 5 · Información insuficiente
+- id: e5_01
+  escenario: 5
+  titulo: Registros sin monto se excluyen, se cuentan y no se estiman
+  calculo: >
+    10 contratos de 2 proveedores; 5 sin monto (4 vacíos y uno con "N/D"). Montos conocidos: Uno 100k+200k+300k = 600,000;
+    Dos 400k+500k = 900,000; total 1,500,000 -> 40.0 % y 60.0 %. Quedan 5 contratos con monto, justo el mínimo del grupo;
+    ln(100k..500k) no produce atípicos. Los contratos sin monto siguen con monto vacío.
+  base: {moneda: MXN, fuente: ComprasMX 2026, dependencia: Dependencia A, tipo_procedimiento: Licitación pública}
+  entrada:
+    filas:
+      - {id: U1, proveedor: Proveedor Uno SA de CV, rfc: PRO010101AAA, monto: 100000, fecha: '2026-01-05'}
+      - {id: U2, proveedor: Proveedor Uno SA de CV, rfc: PRO010101AAA, monto: 200000, fecha: '2026-01-12'}
+      - {id: U3, proveedor: Proveedor Uno SA de CV, rfc: PRO010101AAA, monto: 300000, fecha: '2026-01-19'}
+      - {id: U4, proveedor: Proveedor Uno SA de CV, rfc: PRO010101AAA, monto: null, fecha: '2026-01-26'}
+      - {id: U5, proveedor: Proveedor Uno SA de CV, rfc: PRO010101AAA, monto: null, fecha: '2026-02-02'}
+      - {id: V1, proveedor: Proveedor Dos SA de CV, rfc: PRO020202BBB, monto: 400000, fecha: '2026-02-09'}
+      - {id: V2, proveedor: Proveedor Dos SA de CV, rfc: PRO020202BBB, monto: 500000, fecha: '2026-02-16'}
+      - {id: V3, proveedor: Proveedor Dos SA de CV, rfc: PRO020202BBB, monto: null, fecha: '2026-02-23'}
+      - {id: V4, proveedor: Proveedor Dos SA de CV, rfc: PRO020202BBB, monto: N/D, fecha: '2026-03-02'}
+      - {id: V5, proveedor: Proveedor Dos SA de CV, rfc: PRO020202BBB, monto: null, fecha: '2026-03-09'}
+  esperado:
+    alcance: [MONTO_ATIPICO]
+    senales: []
+    excluidos_total: 5
+    excluidos:
+      - {contrato_id: U4, motivo: sin monto}
+      - {contrato_id: U5, motivo: sin monto}
+      - {contrato_id: V3, motivo: sin monto}
+      - {contrato_id: V4, motivo: sin monto}
+      - {contrato_id: V5, motivo: sin monto}
+    calidad: {sin_monto: 5, contratos_unicos: 10}
+    contratos:
+      U4: {monto: null}
+      V4: {monto: null}
+    concentracion:
+      - {proveedor: Proveedor Uno SA de CV, num_contratos: 5, monto_total: 600000.0, porcentaje_monto: 40.0}
+      - {proveedor: Proveedor Dos SA de CV, num_contratos: 5, monto_total: 900000.0, porcentaje_monto: 60.0}
+
+- id: e5_02
+  escenario: 5
+  titulo: Ningún contrato tiene monto -> la señal de monto no es evaluable y no se calcula nada
+  calculo: 6 contratos sin monto -> no hay grupo con montos válidos; señal no_evaluable con campo faltante monto; la concentración queda en cero y sin porcentaje.
+  base: {moneda: MXN, fuente: ComprasMX 2026, dependencia: Dependencia A, tipo_procedimiento: Licitación pública, proveedor: Proveedor Tres SA de CV, rfc: PRO030303CCC, monto: null}
+  entrada:
+    filas:
+      - {id: T1, fecha: '2026-01-05'}
+      - {id: T2, fecha: '2026-01-12'}
+      - {id: T3, fecha: '2026-01-19'}
+      - {id: T4, fecha: '2026-01-26'}
+      - {id: T5, fecha: '2026-02-02'}
+      - {id: T6, fecha: '2026-02-09'}
+  esperado:
+    alcance: [MONTO_ATIPICO]
+    senales:
+      - {codigo: MONTO_ATIPICO, contratos_ids: [T1, T2, T3, T4, T5, T6], estado: no_evaluable, campos_faltantes: [monto], motivo_contiene: ningún contrato tiene monto positivo}
+    excluidos_total: 6
+    concentracion:
+      - {proveedor: Proveedor Tres SA de CV, num_contratos: 6, monto_total: 0.0, porcentaje_monto: null}
+
+- id: e5_03
+  escenario: 5
+  titulo: Monto en cero o negativo, moneda distinta de pesos y moneda faltante se excluyen con su motivo
+  calculo: >
+    M1 monto 0 y M2 monto -500 -> "monto en cero o negativo". M3 en USD -> "moneda distinta de pesos (USD)".
+    M4 sin moneda y sin moneda por defecto -> "moneda no especificada". No se convierte ni se supone nada.
+  base: {fuente: ComprasMX 2026, dependencia: Dependencia A, tipo_procedimiento: Licitación pública, proveedor: Proveedor Cuatro SA de CV, rfc: PRO040404DDD, fecha: '2026-03-02'}
+  entrada:
+    filas:
+      - {id: M1, monto: 0, moneda: MXN}
+      - {id: M2, monto: -500, moneda: MXN}
+      - {id: M3, monto: 100000, moneda: USD}
+      - {id: M4, monto: 100, moneda: null}
+  esperado:
+    alcance: [MONTO_ATIPICO]
+    excluidos_total: 4
+    excluidos:
+      - {contrato_id: M1, motivo: monto en cero o negativo}
+      - {contrato_id: M2, motivo: monto en cero o negativo}
+      - {contrato_id: M3, motivo: moneda distinta de pesos (USD)}
+      - {contrato_id: M4, motivo: moneda no especificada}
+    calidad: {monto_no_positivo: 2, moneda_distinta_de_pesos: 1, sin_moneda: 1}
+    senales:
+      - {codigo: MONTO_ATIPICO, contratos_ids: [M1, M2, M3, M4], estado: no_evaluable, campos_faltantes: [monto]}
+
+- id: e5_04
+  escenario: 5
+  titulo: Un contrato sin fecha no cuenta para adjudicaciones recurrentes y se declara
+  calculo: 3 adjudicaciones directas al mismo proveedor, una sin fecha -> solo 2 con fecha; el umbral es "más de 2" -> no hay señal. D3 se excluye con motivo "sin fecha".
+  base: {moneda: MXN, fuente: ComprasMX 2026, dependencia: Dependencia A, tipo_procedimiento: Adjudicación directa, proveedor: Adjudicada SA de CV, rfc: ADJ010101AAA}
+  entrada:
+    filas:
+      - {id: D1, monto: 100000, fecha: '2026-03-02'}
+      - {id: D2, monto: 200000, fecha: '2026-03-09'}
+      - {id: D3, monto: 300000, fecha: null}
+  esperado:
+    alcance: [ADJ_DIRECTA_RECURRENTE]
+    senales: []
+    excluidos:
+      - {contrato_id: D3, motivo: sin fecha}
+
+- id: e5_05
+  escenario: 5
+  titulo: Control - con las tres fechas completas la señal de adjudicaciones recurrentes sí aparece
+  calculo: >
+    3 adjudicaciones directas al mismo proveedor y dependencia entre el 02 y el 15 de marzo (13 días, dentro de la ventana de 30).
+    3 > umbral 2 -> señal. 3 < 2*2 -> nivel medio. Todo con RFC, sin contradicciones y con montos -> confianza alta. Monto total 600,000.
+  base: {moneda: MXN, fuente: ComprasMX 2026, dependencia: Dependencia A, tipo_procedimiento: Adjudicación directa, proveedor: Adjudicada SA de CV, rfc: ADJ010101AAA}
+  entrada:
+    filas:
+      - {id: D1, monto: 100000, fecha: '2026-03-02'}
+      - {id: D2, monto: 200000, fecha: '2026-03-09'}
+      - {id: D3, monto: 300000, fecha: '2026-03-15'}
+  esperado:
+    alcance: [ADJ_DIRECTA_RECURRENTE]
+    senales:
+      - codigo: ADJ_DIRECTA_RECURRENTE
+        contratos_ids: [D1, D2, D3]
+        estado: evaluada
+        nivel: medio
+        confianza: alta
+        periodo: {desde: '2026-03-02', hasta: '2026-03-15'}
+        valores: {num_adjudicaciones_directas: 3, ventana_dias: 13, monto_total: 600000.0, contratos_sin_monto_pesos: 0, proveedor_key: ADJ010101AAA, proveedor_key_tipo: rfc, dependencia: Dependencia A}
+
+# ============================================================ ESCENARIO 6 · Información contradictoria
+- id: e6_01
+  escenario: 6
+  titulo: Dos fuentes con montos distintos -> se muestran ambos valores y la señal queda marcada
+  calculo: >
+    C1 aparece con 1,500,000 (ComprasMX) y 1,560,000 (documento del contrato). Con prioridad ComprasMX el valor "a" es el de ComprasMX.
+    Se conservan ambos en contradicciones, C1 queda en_contradiccion y la señal de adjudicaciones que lo incluye baja de confianza (alta -> media),
+    sale afectada_por_contradiccion y pide revisión humana. El monto total de la señal usa el valor canónico (4,850,000) pero la contradicción queda visible.
+  base: {moneda: MXN, dependencia: Dependencia A, tipo_procedimiento: Adjudicación directa, proveedor: Servicios Alfa SA de CV, rfc: SAL010101AAA}
+  entrada:
+    prioridad_fuentes: [ComprasMX 2026, documento del contrato]
+    filas:
+      - {id: C1, monto: 1500000, fecha: '2026-03-02', fuente: ComprasMX 2026}
+      - {id: C2, monto: 1650000, fecha: '2026-03-09', fuente: ComprasMX 2026}
+      - {id: C3, monto: 1700000, fecha: '2026-03-15', fuente: ComprasMX 2026}
+      - {id: C1, monto: 1560000, fecha: '2026-03-02', fuente: documento del contrato}
+  esperado:
+    alcance: [ADJ_DIRECTA_RECURRENTE]
+    senales:
+      - codigo: ADJ_DIRECTA_RECURRENTE
+        contratos_ids: [C1, C2, C3]
+        estado: evaluada
+        nivel: medio
+        confianza: media
+        afectada_por_contradiccion: true
+        requiere_revision_humana: true
+        valores: {num_adjudicaciones_directas: 3, monto_total: 4850000.0}
+    contradicciones_total: 1
+    contradicciones:
+      - {contrato_id: C1, campo: monto, valor_a: '1500000.00', fuente_a: ComprasMX 2026, valor_b: '1560000.00', fuente_b: documento del contrato}
+    contratos:
+      C1: {en_contradiccion: true}
+      C2: {en_contradiccion: false}
+    calidad: {filas_recibidas: 4, contratos_unicos: 3, contratos_en_contradiccion: 1, duplicados_exactos_unidos: 0}
+
+- id: e6_02
+  escenario: 6
+  titulo: Contradicción en fecha y en RFC del mismo contrato -> una entrada por cada campo que difiere
+  calculo: Monto igual; fecha 2026-03-02 vs 2026-03-04 y RFC ...AAA vs ...AAB -> exactamente 2 contradicciones (fecha y rfc), ninguna por monto.
+  base: {moneda: MXN, dependencia: Dependencia A, tipo_procedimiento: Licitación pública, proveedor: Consultora SA de CV, monto: 800000}
+  entrada:
+    prioridad_fuentes: [ComprasMX 2026, documento del contrato]
+    filas:
+      - {id: C1, rfc: CON010101AAA, fecha: '2026-03-02', fuente: ComprasMX 2026}
+      - {id: C1, rfc: CON010101AAB, fecha: '2026-03-04', fuente: documento del contrato}
+  esperado:
+    contradicciones_total: 2
+    contradicciones:
+      - {contrato_id: C1, campo: fecha, valor_a: '2026-03-02', fuente_a: ComprasMX 2026, valor_b: '2026-03-04', fuente_b: documento del contrato}
+      - {contrato_id: C1, campo: rfc, valor_a: CON010101AAA, fuente_a: ComprasMX 2026, valor_b: CON010101AAB, fuente_b: documento del contrato}
+    contratos:
+      C1: {en_contradiccion: true}
+    calidad: {contratos_en_contradiccion: 1, contratos_unicos: 1}
+
+- id: e6_03
+  escenario: 6
+  titulo: Control - el mismo contrato idéntico en dos fuentes se une sin marcar contradicción
+  calculo: Mismas fechas, montos y RFC en ambas fuentes -> duplicado exacto; se une en una fila, cero contradicciones.
+  base: {moneda: MXN, dependencia: Dependencia A, tipo_procedimiento: Licitación pública, proveedor: Consultora SA de CV, rfc: CON010101AAA, monto: 800000, fecha: '2026-03-02'}
+  entrada:
+    filas:
+      - {id: C1, fuente: ComprasMX 2026}
+      - {id: C1, fuente: documento del contrato}
+  esperado:
+    contradicciones_total: 0
+    contratos:
+      C1: {en_contradiccion: false}
+    calidad: {contratos_unicos: 1, duplicados_exactos_unidos: 1, contratos_en_contradiccion: 0}
+
+# ============================================================ D8 · grupo comparable por ley + tipo + año, e inconsistencias como señal
+- id: e4_06
+  escenario: 4
+  titulo: El grupo comparable separa por año - 6,000,000 es atípico en 2026 pero normal entre los contratos de 2025
+  calculo: >
+    Misma ley (LAASSP) y mismo tipo (licitación pública), dos años. Grupo 2026 con 6 montos: 900k, 950k, 1M, 1.05M, 1.1M y 6M.
+    Sobre ln(monto): mediana 1,024,695.08 (mediana de los montos 1,025,000), MAD 0.0733 -> umbral [700,493.81 ; 1,498,942.58];
+    solo 6,000,000 queda fuera, z = 16.26 (|z| >= 7, nivel alto); con 6 comparables la confianza es baja.
+    Grupo 2025 con 6 montos entre 5.5M y 6.5M: umbral [5,046,665.53 ; 7,133,423.01]; ninguno queda fuera. Si se mezclaran los dos años
+    (grupo solo por tipo), el 6M de 2026 quedaría dentro de la mezcla y no se marcaría.
+  base: {moneda: MXN, fuente: ComprasMX 2026, tipo_procedimiento: Licitación pública, ley: LAASSP, rfc: null, dependencia: Dep 1}
+  entrada:
+    filas:
+      - {id: N01, proveedor: Proveedor 01, monto: 900000, fecha: '2026-02-02'}
+      - {id: N02, proveedor: Proveedor 02, monto: 950000, fecha: '2026-02-09'}
+      - {id: N03, proveedor: Proveedor 03, monto: 1000000, fecha: '2026-03-02'}
+      - {id: N04, proveedor: Proveedor 04, monto: 1050000, fecha: '2026-03-09'}
+      - {id: N05, proveedor: Proveedor 05, monto: 1100000, fecha: '2026-04-06'}
+      - {id: N06, proveedor: Proveedor 06, monto: 6000000, fecha: '2026-04-13'}
+      - {id: V01, proveedor: Proveedor 07, monto: 5500000, fecha: '2025-02-03'}
+      - {id: V02, proveedor: Proveedor 08, monto: 5800000, fecha: '2025-03-03'}
+      - {id: V03, proveedor: Proveedor 09, monto: 6000000, fecha: '2025-04-07'}
+      - {id: V04, proveedor: Proveedor 10, monto: 6000000, fecha: '2025-05-05'}
+      - {id: V05, proveedor: Proveedor 11, monto: 6200000, fecha: '2025-06-02'}
+      - {id: V06, proveedor: Proveedor 12, monto: 6500000, fecha: '2025-07-07'}
+  esperado:
+    tolerancia: 0.001
+    alcance: [MONTO_ATIPICO]
+    senales:
+      - codigo: MONTO_ATIPICO
+        contratos_ids: [N06]
+        estado: evaluada
+        nivel: alto
+        confianza: baja
+        requiere_revision_humana: true
+        valores:
+          direccion: alto
+          monto: 6000000.0
+          mediana_grupo: 1025000.0
+          umbral_inferior: 700493.81
+          umbral_superior: 1498942.58
+          puntaje_z: 16.26
+          tamano_grupo: 6
+          grupo: {ley: LAASSP, tipo_proc_norm: licitacion_publica, anio: 2026}
+          dimensiones_sin_dato: []
+
+- id: e4_07
+  escenario: 4
+  titulo: Si la fuente no trae la ley, el grupo lo declara como "sin_dato" en lugar de adivinarla
+  calculo: >
+    Los 6 contratos de 2026 del caso anterior, pero sin la columna ley. El grupo queda (ley sin_dato, licitación pública, 2026) con los mismos
+    montos, así que el umbral y el z son los mismos del caso anterior; la señal lista "ley" en dimensiones_sin_dato para que el reporte lo diga.
+  base: {moneda: MXN, fuente: ComprasMX 2026, tipo_procedimiento: Licitación pública, rfc: null, dependencia: Dep 1}
+  entrada:
+    filas:
+      - {id: N01, proveedor: Proveedor 01, monto: 900000, fecha: '2026-02-02'}
+      - {id: N02, proveedor: Proveedor 02, monto: 950000, fecha: '2026-02-09'}
+      - {id: N03, proveedor: Proveedor 03, monto: 1000000, fecha: '2026-03-02'}
+      - {id: N04, proveedor: Proveedor 04, monto: 1050000, fecha: '2026-03-09'}
+      - {id: N05, proveedor: Proveedor 05, monto: 1100000, fecha: '2026-04-06'}
+      - {id: N06, proveedor: Proveedor 06, monto: 6000000, fecha: '2026-04-13'}
+  esperado:
+    tolerancia: 0.001
+    alcance: [MONTO_ATIPICO]
+    senales:
+      - codigo: MONTO_ATIPICO
+        contratos_ids: [N06]
+        estado: evaluada
+        nivel: alto
+        valores:
+          puntaje_z: 16.26
+          tamano_grupo: 6
+          grupo: {ley: sin_dato, tipo_proc_norm: licitacion_publica, anio: 2026}
+          dimensiones_sin_dato: [ley]
+
+- id: e6_04
+  escenario: 6
+  titulo: La contradicción de monto entre fuentes es una señal propia (INCONSISTENCIA_FUENTES) con ambos valores
+  calculo: >
+    Mismos datos de e6_01: C1 con 1,500,000 (ComprasMX) y 1,560,000 (documento del contrato). Una señal por contrato con diferencias;
+    solo difiere el monto, así que nivel medio (provisional: monto o RFC -> medio, solo fecha -> bajo), confianza alta (es un hecho comparable
+    entre dos fuentes) y revisión humana. Se muestran ambos valores con su fuente y cuál usa el resto de las reglas (el de mayor prioridad).
+  base: {moneda: MXN, dependencia: Dependencia A, tipo_procedimiento: Adjudicación directa, proveedor: Servicios Alfa SA de CV, rfc: SAL010101AAA}
+  entrada:
+    prioridad_fuentes: [ComprasMX 2026, documento del contrato]
+    filas:
+      - {id: C1, monto: 1500000, fecha: '2026-03-02', fuente: ComprasMX 2026}
+      - {id: C2, monto: 1650000, fecha: '2026-03-09', fuente: ComprasMX 2026}
+      - {id: C3, monto: 1700000, fecha: '2026-03-15', fuente: ComprasMX 2026}
+      - {id: C1, monto: 1560000, fecha: '2026-03-02', fuente: documento del contrato}
+  esperado:
+    alcance: [INCONSISTENCIA_FUENTES]
+    senales:
+      - codigo: INCONSISTENCIA_FUENTES
+        contratos_ids: [C1]
+        estado: evaluada
+        nivel: medio
+        confianza: alta
+        afectada_por_contradiccion: true
+        requiere_revision_humana: true
+        valores:
+          campos_en_conflicto: [monto]
+          diferencias:
+            - {campo: monto, valor_a: '1500000.00', fuente_a: ComprasMX 2026, valor_b: '1560000.00', fuente_b: documento del contrato}
+          valor_usado_en_el_resto_de_las_reglas: {monto: 1500000.0}
+
+- id: e6_05
+  escenario: 6
+  titulo: Solo la fecha difiere -> una señal de nivel bajo; fecha y RFC distintos -> una sola señal con las dos diferencias
+  calculo: >
+    C1 difiere solo en fecha (2026-03-02 vs 2026-03-04): una señal, nivel bajo, campos [fecha]. C2 difiere en fecha y en RFC: una sola
+    señal (una por contrato, no una por campo), nivel medio por el RFC, campos [fecha, rfc] y dos diferencias.
+  base: {moneda: MXN, dependencia: Dependencia A, tipo_procedimiento: Licitación pública, proveedor: Consultora SA de CV, monto: 800000}
+  entrada:
+    prioridad_fuentes: [ComprasMX 2026, documento del contrato]
+    filas:
+      - {id: C1, rfc: CON010101AAA, fecha: '2026-03-02', fuente: ComprasMX 2026}
+      - {id: C1, rfc: CON010101AAA, fecha: '2026-03-04', fuente: documento del contrato}
+      - {id: C2, rfc: CON010101AAA, fecha: '2026-03-02', fuente: ComprasMX 2026}
+      - {id: C2, rfc: CON010101AAB, fecha: '2026-03-04', fuente: documento del contrato}
+  esperado:
+    alcance: [INCONSISTENCIA_FUENTES]
+    senales:
+      - {codigo: INCONSISTENCIA_FUENTES, contratos_ids: [C1], estado: evaluada, nivel: bajo, confianza: alta,
+         valores: {campos_en_conflicto: [fecha]}}
+      - {codigo: INCONSISTENCIA_FUENTES, contratos_ids: [C2], estado: evaluada, nivel: medio, confianza: alta,
+         valores: {campos_en_conflicto: [fecha, rfc]}}
+    contradicciones_total: 3
+
+- id: e6_06
+  escenario: 6
+  titulo: Control - un duplicado idéntico entre fuentes no genera señal de inconsistencia
+  calculo: C1 aparece igual en dos fuentes; no hay contradicción, así que no debe haber ninguna señal INCONSISTENCIA_FUENTES.
+  base: {moneda: MXN, dependencia: Dependencia A, tipo_procedimiento: Licitación pública, proveedor: Consultora SA de CV, monto: 800000, rfc: CON010101AAA, fecha: '2026-03-02'}
+  entrada:
+    prioridad_fuentes: [ComprasMX 2026, documento del contrato]
+    filas:
+      - {id: C1, fuente: ComprasMX 2026}
+      - {id: C1, fuente: documento del contrato}
+  esperado:
+    alcance: [INCONSISTENCIA_FUENTES]
+    senales: []
+    contradicciones_total: 0

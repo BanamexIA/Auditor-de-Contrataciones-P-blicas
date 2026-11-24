@@ -236,6 +236,10 @@ def configure_database(model: str, dimension: int, agent_role: str) -> None:
                 "ON rag.chunks USING hnsw (embedding vector_cosine_ops)"
             )
             cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_chunks_texto_es "
+                "ON rag.chunks USING gin (to_tsvector('spanish', contenido))"
+            )
+            cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_chunks_documento_posicion "
                 "ON rag.chunks (documento_id, posicion)"
             )
@@ -592,6 +596,82 @@ def retrieve(
         rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
     elapsed_ms = (time.perf_counter() - started) * 1000
     return rows, elapsed_ms
+
+
+_VIGENCIA_SQL = """(d.tipo <> 'normas'
+               OR (
+                   %(fecha)s::date IS NOT NULL
+                   AND d.fecha_entrada_vigor <= %(fecha)s::date
+                   AND (d.fecha_abrogacion IS NULL OR %(fecha)s::date < d.fecha_abrogacion)
+               ))"""
+RRF_K = 60   # constante usual de Reciprocal Rank Fusion: suaviza el peso de los primeros lugares
+
+
+def _consulta_texto(texto_consulta: str | None, palabras_clave: Sequence[str] | None) -> tuple[str, list[str]]:
+    """Arma la tsquery: cada palabra clave (o frase) es una alternativa (OR); sin palabras clave, se usan los términos de la consulta."""
+    claves = [p.strip() for p in (palabras_clave or []) if p and p.strip()]
+    if claves:
+        expr = " || ".join("websearch_to_tsquery('spanish', %s)" for _ in claves)
+        return expr, claves
+    return "replace(plainto_tsquery('spanish', %s)::text, '&', '|')::tsquery", [texto_consulta or ""]
+
+
+def retrieve_text(conn, vector, top_k, contract_date=None, texto_consulta=None, palabras_clave=None):
+    """Búsqueda por palabras clave (texto completo en español) con el MISMO filtro de vigencia que retrieve()."""
+    expr, params = _consulta_texto(texto_consulta, palabras_clave)
+    sql_text = f"""
+        WITH q AS (SELECT {expr} AS t)
+        SELECT c.id, d.titulo, d.fuente, d.tipo, d.ley, d.version,
+               d.fecha_publicacion_dof, d.fecha_entrada_vigor,
+               d.fecha_abrogacion, d.sha256, d.url_o_ruta,
+               d.metadata AS document_metadata,
+               c.posicion, c.contenido, c.metadata,
+               c.embedding <=> %(vec)s::vector AS distancia_coseno,
+               ts_rank_cd(to_tsvector('spanish', c.contenido), q.t) AS puntaje_texto
+        FROM rag.chunks AS c
+        JOIN rag.documentos AS d ON d.id = c.documento_id, q
+        WHERE to_tsvector('spanish', c.contenido) @@ q.t AND {_VIGENCIA_SQL}
+        ORDER BY puntaje_texto DESC, c.id
+        LIMIT %(n)s"""
+    # los %s de la tsquery son posicionales y el resto nombrados: se pasan todos como nombrados
+    for i in range(len(params)):
+        sql_text = sql_text.replace("%s", f"%(p{i})s", 1)
+    args = {f"p{i}": v for i, v in enumerate(params)}
+    args.update(vec=format_vector(vector), fecha=contract_date, n=top_k)
+    with conn.cursor() as cursor:
+        cursor.execute(sql_text, args)
+        columns = [description.name for description in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+def fusionar_rrf(por_vector: list[dict], por_texto: list[dict], k: int = RRF_K) -> list[dict]:
+    """Reciprocal Rank Fusion: puntaje = suma de 1/(k + posición) en cada lista. Sin pesos que calibrar."""
+    filas: dict[Any, dict] = {}
+    for nombre, lista in (("rank_vector", por_vector), ("rank_texto", por_texto)):
+        for pos, fila in enumerate(lista, start=1):
+            f = filas.setdefault(fila["id"], {**fila, "rank_vector": None, "rank_texto": None})
+            f[nombre] = pos
+            if f.get("puntaje_texto") is None and fila.get("puntaje_texto") is not None:
+                f["puntaje_texto"] = fila["puntaje_texto"]
+    for f in filas.values():
+        f["puntaje_rrf"] = sum(1.0 / (k + r) for r in (f["rank_vector"], f["rank_texto"]) if r)
+        f["coincide_texto"] = f["rank_texto"] is not None
+    return sorted(filas.values(), key=lambda f: (-f["puntaje_rrf"], f["distancia_coseno"], f["id"]))
+
+
+def retrieve_hybrid(conn, vector, top_k, contract_date=None, texto_consulta=None, palabras_clave=None,
+                    candidatos=20) -> tuple[list[dict[str, Any]], float]:
+    """Búsqueda híbrida (D5): vectores + palabras clave, fusionadas con RRF, con el filtro de vigencia a la fecha del contrato.
+
+    Cada fila trae distancia_coseno (para el umbral de similitud), rank_vector, rank_texto, puntaje_rrf y coincide_texto.
+    """
+    if top_k < 1:
+        raise ValueError("top_k must be at least 1.")
+    started = time.perf_counter()
+    por_vector, _ = retrieve(conn, vector, max(candidatos, top_k), contract_date)
+    por_texto = retrieve_text(conn, vector, max(candidatos, top_k), contract_date, texto_consulta, palabras_clave)
+    filas = fusionar_rrf(por_vector, por_texto)[:top_k]
+    return filas, (time.perf_counter() - started) * 1000
 
 
 def run_retrieval_benchmark(

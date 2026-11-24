@@ -180,5 +180,47 @@ class Normativo(unittest.TestCase):
         self.assertEqual(res["normas_recuperadas"], [])
 
 
+class Listado69bDesdeBD(unittest.TestCase):
+    class _Cur:
+        def __init__(self, filas, falla=False):
+            self.filas, self.falla = filas, falla
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def execute(self, *a):
+            if self.falla:
+                raise RuntimeError("permission denied")
+        def fetchall(self): return self.filas
+
+    class _Conn:
+        def __init__(self, cur): self.cur, self.revertida = cur, False
+        def cursor(self): return self.cur
+        def rollback(self): self.revertida = True
+
+    def test_agrega_situacion_por_rfc_y_conserva_varias(self):
+        from agente_deteccion.agente import _agregar_situacion_69b
+        conn = self._Conn(self._Cur([("SAL010101AAA", "Definitivo"), ("SAL010101AAA", "Presunto")]))
+        ms = [{"codigo_contrato": "C1", "rfc": "SAL010101AAA"}]
+        _agregar_situacion_69b(conn, ms)
+        self.assertEqual(ms[0]["situacion"], "Definitivo; Presunto")
+        self.assertIsNone(ms[0]["fecha_publicacion"])
+
+    def test_sin_permiso_degrada_y_no_inventa(self):
+        from agente_deteccion.agente import _agregar_situacion_69b
+        conn = self._Conn(self._Cur([], falla=True))
+        ms = [{"codigo_contrato": "C1", "rfc": "SAL010101AAA"}]
+        _agregar_situacion_69b(conn, ms)
+        self.assertTrue(conn.revertida)
+        self.assertIsNone(ms[0]["situacion"])
+
+    def test_nota_dice_que_falta(self):
+        coinc = [{"codigo_contrato": "CMX-2026-0001", "rfc_exacto": True, "rfc": "SAL010101AAA",
+                  "nombre_del_contribuyente": "SERVICIOS ALFA SA DE CV", "situacion": "Definitivo", "fecha_publicacion": None}]
+        res = ejecutar(BASE, coincidencias=coinc, moneda_por_defecto="MXN")
+        s = [x for x in por_codigo(res, "PROVEEDOR_LISTA_69B") if x["estado"] == "evaluada"][0]
+        self.assertEqual(s["nivel"], "alto")
+        self.assertIn("fecha de publicación", s["valores_calculados"]["nota"])
+        self.assertNotIn("situación vigente", s["valores_calculados"]["nota"])
+
+
 if __name__ == "__main__":
     unittest.main()
