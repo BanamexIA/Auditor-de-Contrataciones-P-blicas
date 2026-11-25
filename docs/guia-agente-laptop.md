@@ -29,11 +29,15 @@ laptop encendida, Tailscale conectado y Ollama abierto.
 ## 2. Ollama y el modelo
 
 1. Instala Ollama: https://ollama.com/download
-2. Descarga el modelo del proyecto (es el valor de `AGENT_MODEL`; hoy `qwen2.5:7b`):
+2. Descarga los dos modelos del proyecto:
    ```powershell
    ollama pull qwen2.5:7b
+   ollama pull nomic-embed-text
    ollama list
    ```
+   - `qwen2.5:7b` es el modelo que redacta la consulta SQL (valor de `AGENT_MODEL`).
+   - `nomic-embed-text` hace los embeddings de la búsqueda normativa (RAG). Sin él,
+     el caso sigue, pero el reporte sale sin fragmentos de norma.
 
 ## 3. Que Ollama acepte conexiones de Tailscale
 
@@ -99,6 +103,8 @@ existe; un integrante nuevo solo tiene que estar en ese grupo.
 - Si apagas la laptop, el backend usa otra disponible. Si no hay ninguna, el caso se
   bloquea con el motivo y el auditor lo desbloquea cuando vuelvas.
 - Si cambia `AGENT_MODEL`, vuelve a hacer `ollama pull` con el nuevo modelo.
+- Los motores se conectan **solo por Tailscale**. El túnel SSH a la EC2 es para ver el
+  front y no lo necesitas para prestar tu laptop.
 
 ## Si algo falla
 

@@ -13,6 +13,9 @@ const CADA_MS = 2500;
 const SEGUIR_MAX_MS = 30 * 60 * 1000;
 const FINALES: EstadoCaso[] = ['en_revision', 'bloqueado', 'cerrado'];
 
+/** Motivo con el que el orquestador se detiene si la consulta no trae contratos (backend/orquestador/nodos.py). */
+const esResumen = (motivo: string | null) => !!motivo?.startsWith('La consulta no devolvió códigos de contrato');
+
 const plural = (n: number, uno: string, varios: string) => `${n} ${n === 1 ? uno : varios}`;
 const esperar = (ms: number, signal: AbortSignal) =>
   new Promise<void>((ok, mal) => {
@@ -101,6 +104,19 @@ export function useChat({ onReporte }: UseChatOptions = {}) {
           patch(msgId, { progreso: { estado: caso.estado, segundos, resumen: resumenDe(eventos) }, consulta });
 
           if (caso.estado === 'bloqueado') {
+            // Un conteo o un total sí es una respuesta: el orquestador se detiene porque no hay contratos
+            // individuales que revisar, pero para quien pregunta no es un error.
+            if (consulta && esResumen(caso.motivo_bloqueo)) {
+              patch(msgId, {
+                status: undefined,
+                progreso: undefined,
+                content:
+                  `Encontré **${plural(consulta.totalFilas, 'fila', 'filas')}**, pero sin el código de cada contrato, así que no ` +
+                  'puedo buscar señales ni generar reporte (pasa con conteos y totales). Para analizarlos, pide la lista ' +
+                  'incluyendo el código, por ejemplo «Lista los contratos de … con su código, proveedor e importe».',
+              });
+              return;
+            }
             patch(msgId, { status: 'aviso', progreso: undefined, content: caso.motivo_bloqueo ?? 'El caso quedó bloqueado.' });
             return;
           }

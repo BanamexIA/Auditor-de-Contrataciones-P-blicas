@@ -10,6 +10,7 @@ interface ChatPanelProps {
   usuario: Usuario | null;
   reporteActivo: ReporteRef | null;
   onOpenReporte: (reporte: ReporteRef) => void;
+  onVerBitacora: (casoId: string) => void;
   onLogout?: () => void;
 }
 
@@ -51,7 +52,7 @@ const SUGERENCIAS = [
   '¿Cuántos contratos de ComprasMX 2026 hay por institución?',
 ];
 
-export function ChatPanel({ usuario, reporteActivo, onOpenReporte, onLogout }: ChatPanelProps) {
+export function ChatPanel({ usuario, reporteActivo, onOpenReporte, onVerBitacora, onLogout }: ChatPanelProps) {
   const { messages, pending, send, cancel, reset } = useChat({ onReporte: onOpenReporte });
   const [draft, setDraft] = useState('');
   const listRef = useRef<HTMLDivElement>(null);
@@ -164,7 +165,14 @@ export function ChatPanel({ usuario, reporteActivo, onOpenReporte, onLogout }: C
                   </span>
                 </button>
               )}
-              {m.casoId && <small className="caso-id">Caso {m.casoId}</small>}
+              {m.casoId && (
+                <small className="caso-id">
+                  Caso {m.casoId} ·{' '}
+                  <button className="link" onClick={() => m.casoId && onVerBitacora(m.casoId)}>
+                    Ver bitácora
+                  </button>
+                </small>
+              )}
             </article>
           ))
         )}
