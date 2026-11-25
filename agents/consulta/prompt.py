@@ -9,6 +9,7 @@ from agents.consulta.concepts import MISSING_CONCEPTS
 from agents.consulta.providers import add_suffix_variants, normalize_provider_literals
 from agents.consulta.validator import (
     MAX_SQL_ROWS,
+    add_contract_code,
     add_missing_limit,
     adds_amounts,
     add_order_tiebreaker,
@@ -20,6 +21,11 @@ from agents.consulta.validator import (
 RESPONSE_TYPES = ("sql", "aclaracion", "sin_datos")
 LIMIT_ADDED_NOTE = (
     f"La consulta no traía LIMIT; el sistema agregó LIMIT {MAX_SQL_ROWS}, el máximo permitido."
+)
+
+
+CONTRACT_CODE_NOTE = (
+    "El sistema agregó codigo_contrato a la lista para poder revisar cada contrato (señales y reporte)."
 )
 
 
@@ -51,7 +57,7 @@ def agency_note(name: str) -> str:
 
 def is_system_note(text: str) -> bool:
     """Notes written by code, which the coverage filter must keep even if a name contains "completo"."""
-    return text in (LIMIT_ADDED_NOTE, SUFFIX_NOTE, CURRENCY_NOTE) or text.startswith(
+    return text in (LIMIT_ADDED_NOTE, SUFFIX_NOTE, CURRENCY_NOTE, CONTRACT_CODE_NOTE) or text.startswith(
         (PROVIDER_NOTE_PREFIX, AGENCY_NOTE_PREFIX)
     )
 
@@ -251,6 +257,7 @@ def parse_response(text: str) -> dict[str, Any]:
     if response_type == "sql":
         sql, limit_added = add_missing_limit(_required_text(payload, "sql"))
         sql, _ = fix_alias_typos(sql)
+        sql, code_added = add_contract_code(sql)
         sql, _ = add_order_tiebreaker(sql)
         sql, providers = normalize_provider_literals(sql)
         sql, searched = add_suffix_variants(sql)
@@ -258,6 +265,8 @@ def parse_response(text: str) -> dict[str, Any]:
         supuestos = _text_list(payload, "supuestos")
         if limit_added:
             supuestos.append(LIMIT_ADDED_NOTE)
+        if code_added:
+            supuestos.append(CONTRACT_CODE_NOTE)
         supuestos.extend(provider_note(name) for name in dict.fromkeys(providers))
         supuestos.extend(agency_note(name) for name in agencies)
         if searched:

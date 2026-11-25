@@ -115,6 +115,59 @@ def add_missing_limit(query: str, max_rows: int = MAX_SQL_ROWS) -> tuple[str, bo
 
 
 TIEBREAK_COLUMN = "codigo_contrato"
+VIEW_69B = "v_coincidencias_69b_agente"
+
+
+def add_contract_code(query: str) -> tuple[str, bool]:
+    """Puts codigo_contrato first in a list of contracts that does not select it.
+
+    Detección and Reportes work contract by contract: without the code, the
+    orchestrator blocks the case. On 2026-11-24 the model answered «Lista las
+    adjudicaciones directas ... con su artículo de excepción, proveedor e
+    importe» without codigo_contrato, although the prompt asks for it.
+
+    Only a plain list changes: one SELECT with no GROUP BY, DISTINCT, aggregate,
+    window or star, reading a view directly in FROM. Counts and totals come
+    back unchanged. Returns the query and whether it changed.
+    """
+    try:
+        statements = sqlglot.parse(query, read="postgres")
+    except sqlglot.errors.ParseError:
+        return query, False
+    if len(statements) != 1 or not isinstance(statements[0], exp.Select):
+        return query, False
+    tree = statements[0]
+    if tree.args.get("group") is not None or tree.args.get("distinct") is not None:
+        return query, False
+    if any(item.find(exp.AggFunc, exp.Window, exp.Star) for item in tree.expressions):
+        return query, False
+    if any(
+        item.alias_or_name == TIEBREAK_COLUMN or _is_tiebreak_column(item.unalias())
+        for item in tree.expressions
+    ):
+        return query, False
+    sources = [tree.args.get("from")] + list(tree.args.get("joins") or [])
+    tables = [s.this for s in sources if s is not None and isinstance(s.this, exp.Table)]
+    tables = [t for t in tables if t.db.lower() == "clean" and t.name.lower() in VIEW_COLUMNS]
+    if not tables:
+        return query, False
+    # The contracts view first: it is the one a list of contracts is about.
+    table = min(tables, key=lambda t: t.name.lower() != "v_contratos_agente")
+    qualifier = table.alias if table.alias else (table.name if len(tables) > 1 else None)
+    column = exp.column(TIEBREAK_COLUMN, table=qualifier)
+    tree.set("expressions", [column, *tree.expressions])
+    return tree.sql(dialect="postgres"), True
+
+
+def uses_69b_view(query: str) -> bool:
+    """True if the SQL reads clean.v_coincidencias_69b_agente (in FROM, a JOIN or a subquery)."""
+    try:
+        statements = sqlglot.parse(query, read="postgres")
+    except sqlglot.errors.ParseError:
+        return False
+    return any(
+        table.name.lower() == VIEW_69B for statement in statements if statement for table in statement.find_all(exp.Table)
+    )
 
 
 def add_order_tiebreaker(query: str) -> tuple[str, bool]:

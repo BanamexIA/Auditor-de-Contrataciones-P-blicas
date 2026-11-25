@@ -5,7 +5,7 @@ from typing import Any, Callable, Sequence
 
 from psycopg import DataError, Error, ProgrammingError
 
-from agents.consulta.concepts import missing_concept, missing_concept_reason, plain_text
+from agents.consulta.concepts import mentions_69b, missing_concept, missing_concept_reason, plain_text
 from agents.consulta.counts import count_support, empty_count, truncation_note
 from agents.consulta.coverage import Coverage, check_coverage, contradicted_no_data
 from agents.consulta.prompt import (
@@ -15,7 +15,7 @@ from agents.consulta.prompt import (
     parse_response,
     proposed_sql,
 )
-from agents.consulta.validator import SQLValidationError
+from agents.consulta.validator import SQLValidationError, uses_69b_view
 from llm.base import LLMClient
 
 
@@ -24,6 +24,11 @@ MAX_ATTEMPTS = 2
 # so the model can fix it. Connection problems and timeouts are not retried.
 SQL_REJECTED_ERRORS = (ProgrammingError, DataError)
 MAX_DB_ERROR_CHARS = 500
+UNASKED_69B = (
+    "La pregunta no menciona el listado 69-B, pero el SQL usa clean.v_coincidencias_69b_agente: "
+    "eso deja fuera los contratos sin coincidencia y la respuesta parecería completa sin serlo. "
+    "Consulta solo clean.v_contratos_agente."
+)
 # Words of a note about coverage, over the text without accents and in lowercase.
 _COVERAGE_TALK = re.compile(
     r"\b(in)?complet[oa]s?\b|\bcobertura\b|\bparcial(es|mente)?\b"
@@ -86,6 +91,16 @@ def answer_question(
                 f"{user_prompt}\n\nTu respuesta anterior no fue válida: {error} "
                 "Corrígela y responde solo con el objeto JSON."
             )
+            continue
+        if result["tipo"] == "sql" and uses_69b_view(result["sql"]) and not mentions_69b(
+            question, *(text for pair in clarifications for text in pair)
+        ):
+            # On 2026-11-24 «Lista las adjudicaciones directas de ComprasMX 2026 ...» came back
+            # joined with the 69-B view: 19 contracts instead of thousands, presented as all of them.
+            error = UNASKED_69B
+            rejected_sql = None
+            failed.append(_failed_attempt(attempt, "validador", error, result["sql"]))
+            prompt = f"{user_prompt}\n\nTu respuesta anterior no fue válida: {error} Responde solo con el objeto JSON."
             continue
         result["intentos"] = attempt
         concept = missing_concept(question)
