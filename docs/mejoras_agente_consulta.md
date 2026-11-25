@@ -380,3 +380,35 @@ Con la mejora 26, la [segunda corrida](../eval/results/escenario1_20261123_12203
 de las 12:20 es la evidencia de A6: **5 de 6 criterios se cumplen y s3 en
 parte**. Ahora responde 239 contratos de "SECRETARÍA DE SALUD" y dice cómo buscó,
 pero sigue sin pedir aclaración (mejora 7).
+
+## Quinta ronda (2026-11-24, prueba con el orquestador)
+
+En el front, con el orquestador, la pregunta «Lista las adjudicaciones directas de
+ComprasMX 2026 con su artículo de excepción, proveedor e importe» devolvió 19 filas
+casi todas de un solo proveedor. El SQL tenía dos fallas:
+
+```sql
+SELECT c.titulo_contrato, c.articulo_de_excepcion, c.proveedor, c.importe
+FROM clean.v_contratos_agente AS c
+JOIN clean.v_coincidencias_69b_agente AS m ON m.codigo_contrato = c.codigo_contrato
+WHERE c.fuente = 'comprasmx' AND c.tipo_procedimiento_norm = 'adjudicacion_directa'
+  AND NOT c.articulo_de_excepcion IS NULL LIMIT 200
+```
+
+**Mejora 27: cruce con el 69-B que la pregunta no pidió.** El JOIN deja fuera
+todas las adjudicaciones sin coincidencia, y la respuesta parece completa sin
+serlo. El prompt ya lo prohíbe; el modelo no lo respetó. Ahora `answer_question`
+rechaza el SQL (etapa `validador`) si usa `clean.v_coincidencias_69b_agente` y ni la
+pregunta ni las aclaraciones hablan del listado (`concepts.mentions_69b`: 69-B,
+EFOS, SAT, listado, RFC, coincidencia, nivel de confianza, revisión humana…). El
+modelo reintenta con el motivo; si insiste, la respuesta es `error`. Las 5
+preguntas de `eval/` que usan esa vista lo mencionan, así que ninguna cambia.
+
+**Mejora 28: lista sin `codigo_contrato`.** Sin el código, Detección y Reportes no
+tienen contratos que revisar y el orquestador bloquea el caso. Ahora
+`validator.add_contract_code` lo pone primero en una lista simple (un SELECT sin
+`GROUP BY`, `DISTINCT`, agregados, ventanas ni `*`, sobre una vista en FROM) y lo
+anota en `supuestos`. Conteos y totales no cambian; ningún SQL esperado de `eval/`
+cambia.
+
+Pruebas: `tests/test_consulta_listas.py`.

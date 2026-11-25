@@ -45,6 +45,21 @@ def plain_text(text: str) -> str:
     return "".join(char for char in decomposed if not unicodedata.combining(char))
 
 
+# Words that bring the 69-B view into a question, over the text without accents and in
+# lowercase. Generous on purpose: a false «yes» only allows the JOIN; a false «no»
+# makes the model retry a valid SQL.
+_TALKS_ABOUT_69B = re.compile(
+    r"69\s*-?\s*b|\befos?\b|\bedos?\b|\bsat\b|\blistado\b|\blista negra\b|factur(era|adora)s?"
+    r"|operaciones simuladas|\bcontribuyentes?\b|\brfc\b|coincidencias?|nivel(es)? de confianza"
+    r"|revision humana"
+)
+
+
+def mentions_69b(*texts: str) -> bool:
+    """True if any text (question or clarification answers) talks about the 69-B listing."""
+    return any(_TALKS_ABOUT_69B.search(plain_text(text)) for text in texts)
+
+
 def missing_concept(question: str) -> str | None:
     """Returns what the sources or the views lack if the question asks about it, or None."""
     plain = plain_text(question)
