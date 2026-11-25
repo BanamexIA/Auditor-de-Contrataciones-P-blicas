@@ -82,6 +82,70 @@ class ReporteRapidoTest(unittest.TestCase):
         self.assertFalse(final.get("parciales"))         # es una elección, no un resultado parcial
 
 
+class UmbralNormasTest(unittest.TestCase):
+    """2026-11-24: sin umbral, cada señal citaba los 3 fragmentos más cercanos aunque no aplicaran."""
+
+    def _normas(self, distancia, umbral=0.28):
+        from tests.test_orquestador import norma
+        esc = Escenario()
+        esc.recuperador = lambda consulta, fecha, top_k: [{**norma(7), "distancia": distancia}]
+        deps = esc.deps()
+        deps.umbral_distancia = umbral
+        from backend.orquestador.grafo import orquestar_caso
+        orquestar_caso(esc.caso["id"], deps, Limites())
+        ev = esc.repo.eventos(esc.caso["id"], "normas_recuperadas")[-1]["detalle"]
+        return ev["normas"], ev["sin_soporte"]
+
+    def test_un_fragmento_lejano_no_se_cita(self):
+        normas, sin = self._normas(0.30)
+        self.assertEqual(normas, [])
+        self.assertTrue(any("umbral de similitud" in s["motivo"] for s in sin))
+
+    def test_uno_cercano_si(self):
+        self.assertTrue(self._normas(0.25)[0])
+
+    def test_sin_umbral_pasa_todo(self):
+        self.assertTrue(self._normas(0.9, umbral=None)[0])
+
+    def test_corpus_vacio_no_se_confunde_con_el_umbral(self):
+        esc = Escenario()
+        esc.recuperador = lambda consulta, fecha, top_k: []
+        from backend.orquestador.grafo import orquestar_caso
+        orquestar_caso(esc.caso["id"], esc.deps(), Limites())
+        sin = esc.repo.eventos(esc.caso["id"], "normas_recuperadas")[-1]["detalle"]["sin_soporte"]
+        self.assertTrue(any("no tiene fragmentos vigentes" in s["motivo"] for s in sin))
+
+    def test_umbral_desde_el_entorno(self):
+        from backend.orquestador.dependencias import umbral_distancia_rag
+        for valor, esperado in (("", 0.28), ("0.3", 0.3), ("ninguno", None)):
+            with self.subTest(valor=valor), patch.dict("os.environ", {"RAG_UMBRAL_DISTANCIA": valor}):
+                self.assertEqual(umbral_distancia_rag(), esperado)
+
+
+class SqlRechazadoTest(unittest.TestCase):
+    """2026-11-24: la bitácora mostraba dos llamadas al modelo sin decir por qué se descartó la primera."""
+
+    def test_cada_intento_descartado_queda_con_su_motivo(self):
+        esc = Escenario()
+        r = esc.respuesta_sql()
+        r["intentos_fallidos"] = [{"intento": 1, "etapa": "validador", "sql": "SELECT ... JOIN 69b",
+                                   "error": "La pregunta no menciona el listado 69-B"}]
+        esc.respuestas = [r]
+        self.assertEqual(esc.correr()["estado"], e.EN_REVISION)
+        ev = esc.repo.eventos(esc.caso["id"], "sql_rechazado")
+        self.assertEqual(len(ev), 1)
+        self.assertEqual((ev[0]["detalle"]["intento"], ev[0]["detalle"]["etapa"]), (1, "validador"))
+        self.assertIn("69-B", ev[0]["detalle"]["motivo"])
+
+    def test_un_error_final_no_se_registra_dos_veces(self):
+        esc = Escenario()
+        fallido = {"intento": 2, "etapa": "base", "sql": "SELECT x", "error": "PostgreSQL rechazó"}
+        esc.respuestas = [{"tipo": "error", "motivo": "2 intentos", "sql_rechazado": "SELECT x",
+                           "intentos_fallidos": [dict(fallido, intento=1), fallido]}]
+        self.assertEqual(esc.correr()["estado"], e.BLOQUEADO)
+        self.assertEqual(len(esc.repo.eventos(esc.caso["id"], "sql_rechazado")), 2)
+
+
 class ApiTest(unittest.TestCase):
     def setUp(self):
         from backend.app import create_app

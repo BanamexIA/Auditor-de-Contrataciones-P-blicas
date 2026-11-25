@@ -20,6 +20,13 @@ const NOMBRE: Record<string, string> = {
 };
 
 const FINALES = ['en_revision', 'cerrado', 'bloqueado'];
+/** Quién descartó el intento del Agente Consulta (agents/consulta/agent.py). */
+const ETAPA_RECHAZO: Record<string, string> = {
+  validador: 'validador de SQL',
+  base: 'PostgreSQL',
+  formato: 'formato de la respuesta',
+  cobertura: 'revisión de cobertura',
+};
 const CADA_MS = 4000;
 
 const num = (v: unknown) => (typeof v === 'number' ? v : Number(v ?? 0)) || 0;
@@ -51,7 +58,9 @@ function resumen(ev: EventoBitacora): string {
     case 'sql_generado':
       return lista(d.supuestos).length ? `Supuestos: ${lista(d.supuestos).join('; ')}` : 'Propuesto por el Agente Consulta';
     case 'sql_rechazado':
-      return `Motivo: ${d.motivo ?? '—'}`;
+      return `${d.intento ? `Intento ${d.intento}` : 'Rechazado'}${d.etapa ? ` (${ETAPA_RECHAZO[String(d.etapa)] ?? d.etapa})` : ''}: ${
+        d.motivo ?? '—'
+      }`;
     case 'sql_ejecutado':
       return `${num(d.filas)} fila(s) en ${Math.round(num(d.duracion_ms))} ms, en solo lectura${d.truncado ? ' · truncado al límite' : ''}`;
     case 'calidad_evaluada': {

@@ -11,10 +11,17 @@ Aplicación web en **React + TypeScript (Vite)** que habla con el backend **Flas
 - **Derecha — Señales y decisión:** revisión humana. Cada señal se marca como relevante,
   descartada (con comentario obligatorio) o pendiente, y el caso se cierra cuando todas están
   decididas. Todo queda en la bitácora con el usuario.
+- **Derecha — Casos:** los casos recientes (por defecto solo los tuyos). Al elegir uno se abre su último reporte o, si
+  no tiene (p. ej. bloqueado), su bitácora. El caso abierto se recuerda al recargar la página.
 - **Derecha — Bitácora:** el rastro del caso en orden (solicitud, SQL, llamadas al modelo con
   equipo y latencia, calidad, reglas, normas, reporte, decisiones y errores). Es de solo lectura,
   se actualiza sola mientras el caso corre y se descarga en JSON. Se abre también desde
   «Ver bitácora» en cualquier mensaje del chat, incluso si el caso quedó bloqueado.
+
+## En la EC2 (sin Node)
+
+La imagen del backend compila el front y Flask lo sirve en `/`; la API también responde bajo `/api`. Ver
+[docs/guia-front-ec2.md](../docs/guia-front-ec2.md). Lo de abajo es para desarrollo con recarga en caliente.
 
 ## Arranque
 

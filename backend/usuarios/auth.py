@@ -33,7 +33,8 @@ from backend.usuarios.seguridad import (
 
 bp = Blueprint("auth", __name__)
 
-RUTAS_PUBLICAS = {"health", "database_health", "auth.login", "static"}
+RUTAS_PUBLICAS = {"health", "database_health", "auth.login", "static",
+                  "front.indice", "front.recurso"}  # la página del front (backend/front.py); la API sigue protegida
 INTENTOS_MAX = 5
 VENTANA_S = 300
 

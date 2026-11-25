@@ -4,6 +4,7 @@ from datetime import date
 from agente_deteccion.agente import ejecutar
 from agente_deteccion.detectores import Parametros
 from agente_deteccion.esquema import validar_resultado
+from agente_deteccion.normativo import recuperar_normas
 from agente_deteccion.normalizacion import normalizar_monto, normalizar_procedimiento, normalizar_rfc
 
 F = "ComprasMX 2026"
@@ -149,7 +150,8 @@ class Normativo(unittest.TestCase):
 
         def recuperador(consulta, fecha, top_k):
             llamadas.append((consulta, fecha))
-            return [{"id": 7, "ley": "LAASSP", "version": "Nueva Ley DOF 16-04-2025", "fecha_entrada_vigor": date(2025, 4, 17),
+            ley = "CFF" if "69-B" in consulta else "LAASSP"   # cada señal solo cita su ley
+            return [{"id": 7, "ley": ley, "version": "Nueva Ley DOF 16-04-2025", "fecha_entrada_vigor": date(2025, 4, 17),
                      "fecha_abrogacion": None, "contenido": "[fragmento de prueba]", "articulo": "Artículo X",
                      "distancia": 0.3, "fuente": "ruta"}]
         res = ejecutar(BASE, listado_69b=LISTADO, recuperador=recuperador, moneda_por_defecto="MXN")
@@ -158,6 +160,25 @@ class Normativo(unittest.TestCase):
         self.assertEqual(ligadas, {"ADJ_DIRECTA_RECURRENTE", "PROVEEDOR_LISTA_69B"})
         self.assertEqual(llamadas[0][1], date(2026, 3, 2))                     # fecha del contrato más antiguo de la señal
         self.assertTrue(all(n["texto"] == "[fragmento de prueba]" for n in res["normas_recuperadas"]))
+
+    def test_cada_senal_cita_solo_su_ley(self):
+        # 2026-11-24: una obra pública (LOPSRM) citaba la LAASSP, y el 69-B podía citar la LAASSP.
+        pedidas = []
+
+        def recuperador(consulta, fecha, top_k, leyes=None):
+            pedidas.append(leyes)
+            return [{"id": 1, "ley": "LAASSP", "version": "v", "fecha_entrada_vigor": date(2025, 4, 17),
+                     "fecha_abrogacion": None, "contenido": "[x]", "articulo": "Artículo 54", "distancia": 0.2, "fuente": "r"}]
+        contratos = [{"id": "O1", "fecha": date(2026, 3, 1), "ley": "LOPSRM"}, {"id": "A1", "fecha": date(2026, 3, 1), "ley": "LAASSP"}]
+        senales = [{"senal_id": "ADJ-OBRA", "codigo": "ADJ_DIRECTA_RECURRENTE", "estado": "evaluada", "contratos_ids": ["O1"]},
+                   {"senal_id": "ADJ-ADQ", "codigo": "ADJ_DIRECTA_RECURRENTE", "estado": "evaluada", "contratos_ids": ["A1"]},
+                   {"senal_id": "69B", "codigo": "PROVEEDOR_LISTA_69B", "estado": "evaluada", "contratos_ids": ["A1"]}]
+        normas, sin = recuperar_normas(senales, contratos, recuperador)
+        self.assertEqual(pedidas, [["LOPSRM", "RLOPSRM"], ["LAASSP", "RLAASSP"], ["CFF"]])  # cada ley con su reglamento
+        self.assertEqual({n["senal_id"] for n in normas}, {"ADJ-ADQ"})          # y se aplica aunque no lo respete
+        motivos = {s["senal_id"]: s["motivo"] for s in sin}
+        self.assertIn("de LOPSRM, RLOPSRM", motivos["ADJ-OBRA"])
+        self.assertIn("de CFF", motivos["69B"])
 
     def test_monto_atipico_declara_que_no_hay_norma(self):
         filas = [{"id": f"L{i}", "proveedor": f"P{i}", "rfc": None, "monto": 100000 + i * 1000, "dependencia": "D",
@@ -178,6 +199,48 @@ class Normativo(unittest.TestCase):
                            "contenido": "t", "articulo": "a", "distancia": 0.9, "fuente": None}]
         res = ejecutar(BASE, recuperador=rec, moneda_por_defecto="MXN", umbral_distancia=0.5)
         self.assertEqual(res["normas_recuperadas"], [])
+
+
+class Listado69bDesdeBD(unittest.TestCase):
+    class _Cur:
+        def __init__(self, filas, falla=False):
+            self.filas, self.falla = filas, falla
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def execute(self, *a):
+            if self.falla:
+                raise RuntimeError("permission denied")
+        def fetchall(self): return self.filas
+
+    class _Conn:
+        def __init__(self, cur): self.cur, self.revertida = cur, False
+        def cursor(self): return self.cur
+        def rollback(self): self.revertida = True
+
+    def test_agrega_situacion_por_rfc_y_conserva_varias(self):
+        from agente_deteccion.agente import _agregar_situacion_69b
+        conn = self._Conn(self._Cur([("SAL010101AAA", "Definitivo"), ("SAL010101AAA", "Presunto")]))
+        ms = [{"codigo_contrato": "C1", "rfc": "SAL010101AAA"}]
+        _agregar_situacion_69b(conn, ms)
+        self.assertEqual(ms[0]["situacion"], "Definitivo; Presunto")
+        self.assertIsNone(ms[0]["fecha_publicacion"])
+
+    def test_sin_permiso_degrada_y_no_inventa(self):
+        from agente_deteccion.agente import _agregar_situacion_69b
+        conn = self._Conn(self._Cur([], falla=True))
+        ms = [{"codigo_contrato": "C1", "rfc": "SAL010101AAA"}]
+        _agregar_situacion_69b(conn, ms)
+        self.assertTrue(conn.revertida)
+        self.assertIsNone(ms[0]["situacion"])
+
+    def test_nota_dice_que_falta(self):
+        coinc = [{"codigo_contrato": "CMX-2026-0001", "rfc_exacto": True, "rfc": "SAL010101AAA",
+                  "nombre_del_contribuyente": "SERVICIOS ALFA SA DE CV", "situacion": "Definitivo", "fecha_publicacion": None}]
+        res = ejecutar(BASE, coincidencias=coinc, moneda_por_defecto="MXN")
+        s = [x for x in por_codigo(res, "PROVEEDOR_LISTA_69B") if x["estado"] == "evaluada"][0]
+        self.assertEqual(s["nivel"], "alto")
+        self.assertIn("fecha de publicación", s["valores_calculados"]["nota"])
+        self.assertNotIn("situación vigente", s["valores_calculados"]["nota"])
 
 
 if __name__ == "__main__":

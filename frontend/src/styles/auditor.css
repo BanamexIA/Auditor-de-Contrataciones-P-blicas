@@ -574,3 +574,69 @@ details.sql pre {
   cursor: pointer;
   color: var(--text-muted);
 }
+
+/* ---------- casos ---------- */
+.casos-filtro {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.casos-lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.caso-item {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+}
+
+.caso-item:hover {
+  border-color: var(--border-strong);
+}
+
+.caso-item.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.caso-solicitud {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.caso-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.caso-meta .chip {
+  margin-left: 0;
+}
+
+.caso-motivo {
+  font-size: 12px;
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}

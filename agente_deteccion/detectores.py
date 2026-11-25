@@ -5,14 +5,17 @@ con criterio, valores calculados y umbral visibles. Ninguno usa un LLM ni invent
 información, la señal queda 'no_evaluable' y dice qué falta.
 
 Los umbrales NO están aprobados: el socio formador debe confirmarlos (umbral de adjudicaciones directas,
-concentración, montos atípicos y el criterio de 'comparable'). Por eso viven en Parametros y salen en el JSON.
+concentración, montos atípicos y el criterio de 'comparable'). Viven en la tabla config.umbrales (etl/sql/21_config_umbrales.sql),
+cada uno con su motivo y su estado ('provisional' o 'confirmado'), y salen en el JSON dentro de 'umbrales'.
+Los valores de Parametros son solo el RESPALDO para cuando no hay base (pruebas, CSV de demostración): en ese caso el JSON
+declara origen 'codigo' y estado 'provisional'.
 """
 import json
 import math
 import statistics
 import unicodedata
 from collections import Counter, defaultdict
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, fields
 
 from .esquema import Senal
 from .normalizacion import normalizar_proveedor, normalizar_rfc
@@ -23,10 +26,12 @@ class Parametros:
     adj_umbral_n: int = 2                  # señal si hay MÁS de n adjudicaciones directas en la ventana
     adj_ventana_dias: int = 30
     adj_agrupar_por_dependencia: bool = True
-    monto_columnas_grupo: tuple = ("tipo_proc_norm",)   # criterio de 'comparable' (pendiente del socio)
+    adj_factor_nivel_alto: float = 2       # nivel alto si hay al menos factor x n adjudicaciones en la ventana
+    monto_columnas_grupo: tuple = ("ley", "tipo_proc_norm", "anio")   # 'comparable' = misma ley, tipo de procedimiento y año (plan; pendiente del socio)
     monto_min_grupo: int = 5
     monto_umbral_z: float = 3.5            # puntaje z robusto (mediana y MAD)
     monto_escala_log: bool = True          # los montos son muy asimétricos: se compara sobre el logaritmo
+    monto_factor_nivel_alto: float = 2     # nivel alto si |z| >= factor x umbral z
     comparables_confianza_alta: int = 30
     comparables_confianza_media: int = 10
 
@@ -36,10 +41,50 @@ class Parametros:
             datos = json.load(f)
         if "monto_columnas_grupo" in datos:
             datos["monto_columnas_grupo"] = tuple(datos["monto_columnas_grupo"])
-        return cls(**datos)
+        p = cls(**datos)
+        p.origen = f"archivo:{ruta}"
+        return p
+
+    # --- procedencia de los umbrales (no son umbrales: no entran en a_dict)
+    origen: str = "codigo"
+    meta: dict | None = None
 
     def a_dict(self) -> dict:
-        return asdict(self)
+        return {k: v for k, v in asdict(self).items() if k not in ("origen", "meta")}
+
+    @classmethod
+    def desde_filas(cls, filas: list[dict], origen: str = "config.umbrales") -> "Parametros":
+        """filas de config.umbrales: clave, valor, unidad, motivo, estado. Una clave desconocida es un error (no se ignora)."""
+        validas = {f.name for f in fields(cls)} - {"origen", "meta"}
+        datos, meta = {}, {}
+        for f in filas:
+            if f["clave"] not in validas:
+                raise ValueError(f"config.umbrales trae una clave que el agente no conoce: {f['clave']}")
+            v = f["valor"]
+            datos[f["clave"]] = tuple(v) if isinstance(v, list) else v
+            meta[f["clave"]] = {"estado": f.get("estado") or "provisional", "unidad": f.get("unidad"), "motivo": f.get("motivo")}
+        p = cls(**datos)
+        p.origen, p.meta = origen, meta
+        return p
+
+    def detalle(self) -> dict:
+        """Cada umbral con su valor, estado y motivo. Lo que no vino de la tabla se declara provisional."""
+        out = {}
+        for k, v in self.a_dict().items():
+            m = (self.meta or {}).get(k) or {}
+            out[k] = {"valor": list(v) if isinstance(v, tuple) else v, "estado": m.get("estado", "provisional"),
+                      "unidad": m.get("unidad"), "motivo": m.get("motivo")}
+        return out
+
+    def resumen_umbrales(self) -> dict:
+        det = self.detalle()
+        provisionales = sorted(k for k, d in det.items() if d["estado"] != "confirmado")
+        return {"origen": self.origen, "estado": "provisional" if provisionales else "confirmado",
+                "provisionales": provisionales, "parametros": det,
+                "nota": ("Los umbrales son provisionales: el socio formador aún no los confirma." if provisionales
+                         else "Todos los umbrales están confirmados por el socio formador.")
+                + ("" if self.origen == "config.umbrales" else
+                   f" Se usaron los valores de respaldo ({self.origen}); config.umbrales no se consultó.")}
 
 
 def _periodo(cs):
@@ -82,7 +127,7 @@ def detectar_adj_directa(contratos: list[dict], p: Parametros) -> list[Senal]:
             criterio="Más adjudicaciones directas al mismo proveedor (y dependencia) que el umbral dentro de la ventana de días",
             umbral={"operador": ">", "valor": p.adj_umbral_n, "unidad": "adjudicaciones_directas",
                     "ventana_dias": p.adj_ventana_dias},
-            nivel="alto" if len(mejor) >= 2 * p.adj_umbral_n else "medio",
+            nivel="alto" if len(mejor) >= p.adj_factor_nivel_alto * p.adj_umbral_n else "medio",
             confianza=_confianza(problemas), periodo=_periodo(mejor),
             valores_calculados={
                 "proveedor_key": prov, "proveedor_key_tipo": mejor[0]["proveedor_key_tipo"], "dependencia": dep,
@@ -95,13 +140,22 @@ def detectar_adj_directa(contratos: list[dict], p: Parametros) -> list[Senal]:
 
 
 # ------------------------------------------------------------------ MONTOS ATÍPICOS (HU-03)
+SIN_DATO = "sin_dato"
+
+
+def _valor_grupo(c: dict, col: str):
+    """Valor de una dimensión del grupo de comparación; si la fuente no la trae NO se adivina: queda 'sin_dato'."""
+    v = c.get(col)
+    return SIN_DATO if v is None or v == "" else v
+
+
 def detectar_monto_atipico(contratos: list[dict], p: Parametros) -> list[Senal]:
     elegibles = [c for c in contratos if c["monto"] is not None and c["monto"] > 0 and c["moneda"] == "MXN"]
     if not contratos:
         return []
     grupos = defaultdict(list)
     for c in elegibles:
-        grupos[tuple(c[col] for col in p.monto_columnas_grupo)].append(c)
+        grupos[tuple(_valor_grupo(c, col) for col in p.monto_columnas_grupo)].append(c)
     senales, evaluados = [], 0
     for clave, cs in sorted(grupos.items(), key=lambda kv: str(kv[0])):
         if len(cs) < p.monto_min_grupo:
@@ -132,14 +186,15 @@ def detectar_monto_atipico(contratos: list[dict], p: Parametros) -> list[Senal]:
                 nombre="Monto atípico frente a contratos comparables",
                 criterio=f"Monto fuera del umbral calculado con {metodo} dentro de su grupo de comparación",
                 umbral={"operador": "|z|>", "valor": p.monto_umbral_z, "unidad": "puntaje_z_robusto"},
-                nivel="alto" if (z is not None and abs(z) >= 2 * p.monto_umbral_z) else "medio",
+                nivel="alto" if (z is not None and abs(z) >= p.monto_factor_nivel_alto * p.monto_umbral_z) else "medio",
                 confianza=_confianza(problemas), periodo=_periodo([c]),
                 valores_calculados={
                     "monto": c["monto"], "direccion": "alto" if v > sup else "bajo",
                     "mediana_grupo": round(statistics.median(montos), 2), "mad": round(mad, 4),
                     "umbral_superior": round(inv(sup), 2), "umbral_inferior": round(inv(inf), 2),
                     "puntaje_z": None if z is None else round(z, 2), "tamano_grupo": len(cs), "metodo": metodo,
-                    "grupo": dict(zip(p.monto_columnas_grupo, clave))},
+                    "grupo": dict(zip(p.monto_columnas_grupo, clave)),
+                    "dimensiones_sin_dato": [col for col, v in zip(p.monto_columnas_grupo, clave) if v == SIN_DATO]},
                 contratos_ids=[c["id"]], afectada_por_contradiccion=c["en_contradiccion"]))
     if not evaluados:
         motivo = (f"ningún grupo de comparación tiene al menos {p.monto_min_grupo} contratos con monto válido en pesos"
@@ -151,6 +206,41 @@ def detectar_monto_atipico(contratos: list[dict], p: Parametros) -> list[Senal]:
             estado="no_evaluable", motivo=motivo,
             campos_faltantes=["grupo_comparable_suficiente"] if elegibles else ["monto"],
             contratos_ids=[c["id"] for c in contratos]))
+    return senales
+
+
+# ------------------------------------------------------------------ INCONSISTENCIAS ENTRE FUENTES (HU-03)
+_CAMPOS_INCONSISTENCIA = {"monto": "monto", "fecha": "fecha de inicio", "rfc": "RFC"}
+
+
+def detectar_inconsistencias(contratos: list[dict], contradicciones: list[dict]) -> list[Senal]:
+    """Una señal por contrato cuyas fuentes no coinciden en monto, fecha o RFC.
+
+    No decide cuál valor es el correcto: muestra AMBOS valores con su fuente y deja el caso en revisión humana.
+    El nivel es provisional: monto o RFC distintos -> medio; solo la fecha -> bajo.
+    """
+    por_id = {c["id"]: c for c in contratos}
+    por_contrato = defaultdict(list)
+    for d in contradicciones:
+        if d["contrato_id"] in por_id:
+            por_contrato[d["contrato_id"]].append(d)
+    senales = []
+    for cid, ds in sorted(por_contrato.items(), key=lambda kv: str(kv[0])):
+        campos = sorted({d["campo"] for d in ds})
+        c = por_id[cid]
+        senales.append(Senal(
+            senal_id=f"INCONSISTENCIA_FUENTES-{len(senales) + 1:03d}", codigo="INCONSISTENCIA_FUENTES",
+            nombre="Inconsistencia entre fuentes de datos",
+            criterio="El mismo contrato aparece en más de una fuente con valores distintos de monto, fecha o RFC",
+            umbral="cualquier diferencia entre fuentes en monto, fecha de inicio o RFC",
+            nivel="bajo" if campos == ["fecha"] else "medio", confianza="alta", periodo=_periodo([c]),
+            valores_calculados={
+                "campos_en_conflicto": campos,
+                "diferencias": [{"campo": d["campo"], "valor_a": d["valor_a"], "fuente_a": d["fuente_a"],
+                                 "valor_b": d["valor_b"], "fuente_b": d["fuente_b"]} for d in ds],
+                "valor_usado_en_el_resto_de_las_reglas": {k: (c[k].isoformat() if k == "fecha" and c[k] else c[k]) for k in campos},
+                "nota": "no se decidió cuál valor es correcto; el resto de las reglas usa el de la fuente con mayor prioridad"},
+            contratos_ids=[cid], afectada_por_contradiccion=True))
     return senales
 
 
@@ -189,6 +279,12 @@ def _nivel_69b(situacion, exacto: bool) -> str:
     return "medio"                          # presunto o situación desconocida
 
 
+def _nota_69b(sit, fpub):
+    faltan = [n for n, v in (("situación vigente", sit), ("fecha de publicación", fpub)) if not v]
+    return None if not faltan else \
+        "la fuente cargada no trae: " + " ni ".join(faltan) + "; verificar en el listado oficial del SAT antes de interpretarla"
+
+
 def detectar_69b(contratos: list[dict], coincidencias: list[dict] | None) -> list[Senal]:
     if not contratos:
         return []
@@ -218,7 +314,7 @@ def detectar_69b(contratos: list[dict], coincidencias: list[dict] | None) -> lis
                 "criterio_cruce": "rfc_exacto" if exacto else "nombre_normalizado",
                 "rfc": ms[0].get("rfc"), "nombre_en_listado": ms[0].get("nombre_del_contribuyente"),
                 "situacion_vigente": sit, "fecha_publicacion": fpub,
-                "nota": None if (sit and fpub) else "falta situación vigente o fecha de publicación en la fuente"},
+                "nota": _nota_69b(sit, fpub)},
             contratos_ids=[c["id"] for c in cs], afectada_por_contradiccion=any(c["en_contradiccion"] for c in cs)))
     sin_rfc = [c["id"] for c in contratos if not c["rfc_valido"] and c["id"] not in con_coincidencia]
     if sin_rfc:

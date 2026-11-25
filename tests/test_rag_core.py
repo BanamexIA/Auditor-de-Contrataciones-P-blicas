@@ -163,13 +163,33 @@ class RetrievalVigencyTests(unittest.TestCase):
         self.assertIn("d.metadata AS document_metadata", query)
         self.assertEqual(
             conn.active_cursor.parameters,
-            ("[0.25,0.5]", date(2024, 6, 1), date(2024, 6, 1), date(2024, 6, 1), "[0.25,0.5]", 3),
+            ("[0.25,0.5]", date(2024, 6, 1), date(2024, 6, 1), date(2024, 6, 1), None, None, None, None,
+             "[0.25,0.5]", 3),
         )
+
+    def test_types_are_filtered_before_the_limit(self):
+        # 2026-11-24: filtering 'normas' after the LIMIT left the list empty when the
+        # nearest chunks were documentation.
+        conn = self.Connection()
+        retrieve(conn, [0.25], top_k=3, contract_date=date(2026, 3, 10), tipos=("normas",))
+        query = conn.active_cursor.query
+        self.assertLess(query.index("d.tipo = ANY"), query.index("LIMIT"))
+        self.assertEqual(conn.active_cursor.parameters[4:6], (["normas"], ["normas"]))
 
     def test_normative_retrieval_without_contract_date_passes_null_filter(self):
         conn = self.Connection()
         retrieve(conn, [0.25], top_k=1)
         self.assertEqual(conn.active_cursor.parameters[1:4], (None, None, None))
+
+
+class DictRowTests(unittest.TestCase):
+    """2026-11-24: con row_factory=dict_row (la conexión del orquestador) el RAG devolvía 0 fragmentos."""
+
+    def test_dict_rows_keep_their_values(self):
+        from rag.core import _fila
+        fila = {"id": 7, "tipo": "normas", "distancia_coseno": 0.2}
+        self.assertEqual(_fila(["id", "tipo", "distancia_coseno"], fila), fila)
+        self.assertEqual(_fila(["id", "tipo"], (7, "normas")), {"id": 7, "tipo": "normas"})
 
 
 if __name__ == "__main__":

@@ -84,6 +84,11 @@ export const auditor = {
     });
   },
 
+  /** Casos más recientes primero (máximo 100). */
+  async listarCasos(limite = 50): Promise<Caso[]> {
+    return (await apiJson<{ casos: Caso[] }>(`/casos?limite=${limite}`)).casos;
+  },
+
   caso(casoId: string) {
     return apiJson<Caso>(`/casos/${enc(casoId)}`);
   },
