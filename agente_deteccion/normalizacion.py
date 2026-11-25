@@ -5,7 +5,7 @@ fuentes y marca problemas de calidad SIN imputar valores faltantes.
 
 Fila cruda (llaves esperadas; las que falten quedan en None):
     id, proveedor, rfc, monto, moneda, dependencia, tipo_procedimiento, fecha, fuente,
-    [fecha_fin], [tipo_procedimiento_norm]  <- si el ETL ya la calculó se respeta
+    [fecha_fin], [tipo_procedimiento_norm]  <- si el ETL ya la calculó se respeta, [ley]
 """
 import re
 import unicodedata
@@ -137,6 +137,8 @@ def normalizar_fila(f: dict, moneda_por_defecto: str | None = None, alias: dict[
         "dependencia": normalizar_texto(f.get("dependencia")) or None,
         "tipo_procedimiento": normalizar_texto(f.get("tipo_procedimiento")) or None,
         "tipo_proc_norm": proc_norm,
+        "ley": normalizar_texto(f.get("ley")).upper() or None,      # LAASSP, LOPSRM, LAPP, ESTATAL… (None si la fuente no la trae)
+        "anio": fecha.year if fecha else None,                      # año de inicio; criterio de 'comparable' de los montos
         "fecha": fecha, "fecha_estado": fecha_estado,
         "fecha_texto_invalido": fecha_estado is not None or (fecha is None and not _vacio(f.get("fecha"))),
         "fecha_fin": fecha_fin,

@@ -56,9 +56,12 @@ def validar_resultado(res: dict) -> list[str]:
     p = []
     for llave in ("consulta_id", "version_reglas", "contratos", "senales", "normas_recuperadas",
                   "sin_norma_aplicable", "excluidos", "contradicciones", "concentracion",
-                  "patrones_adjudicacion", "calidad", "aviso"):
+                  "patrones_adjudicacion", "calidad", "umbrales", "aviso"):
         if llave not in res:
             p.append(f"falta la llave '{llave}'")
+    u = res.get("umbrales") or {}
+    if u and u.get("estado") not in ("provisional", "confirmado"):
+        p.append("umbrales.estado debe ser 'provisional' o 'confirmado'")
     ids = {c["id"] for c in res.get("contratos", [])}
     vistos = set()
     for s in res.get("senales", []):

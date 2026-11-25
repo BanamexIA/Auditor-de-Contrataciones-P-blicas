@@ -3,3 +3,4 @@ dist
 .node
 .env.local
 *.log
+.vite
