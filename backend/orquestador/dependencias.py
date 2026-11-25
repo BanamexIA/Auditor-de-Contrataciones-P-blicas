@@ -60,13 +60,14 @@ def dependencias_reales(repo, repo_agentes, log: Callable[[str], None] | None = 
         return etapa_calidad(repo, caso_id, ids)
 
     def crear_recuperador(agente: dict | None):
+        from agente_deteccion.normativo import llamar
         if not agente and not os.environ.get("OLLAMA_EMBED_BASE_URL"):
             raise RuntimeError("no hay laptop para calcular embeddings")
         base = recuperador_para(agente, connect_agent_ro(dict_rows=True))
 
-        def recuperar(consulta, fecha, top_k):
+        def recuperar(consulta, fecha, top_k, **extra):
             try:
-                return base(consulta, fecha, top_k)
+                return llamar(base, consulta, fecha, top_k, **extra)
             except Exception:
                 try:  # deja la conexión usable para la siguiente señal
                     base.conn.rollback()

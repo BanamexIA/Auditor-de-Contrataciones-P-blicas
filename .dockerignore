@@ -1,0 +1,14 @@
+# Lo que no debe entrar al contexto de `docker compose build` (backend/Dockerfile).
+.git
+.env
+.env.*
+!.env.example
+**/__pycache__
+**/*.pyc
+.pytest_cache
+frontend/node_modules
+frontend/dist
+frontend/.vite
+frontend/.node
+frontend/.env.local
+eval/results

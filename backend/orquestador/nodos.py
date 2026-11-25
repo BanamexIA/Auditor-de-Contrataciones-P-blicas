@@ -24,7 +24,7 @@ from urllib.error import URLError
 
 from agente_deteccion.agente import ejecutar as ejecutar_deteccion
 from agente_deteccion.esquema import validar_resultado
-from agente_deteccion.normativo import recuperar_normas
+from agente_deteccion.normativo import llamar, recuperar_normas
 from backend.agentes.servicio import AgenteNoDisponible
 from backend.casos import estados as e
 from backend.casos.bitacora import (
@@ -229,6 +229,14 @@ def nodo_consulta(deps: Dependencias, limites: Limites):
                 "encendida, con Tailscale conectado y Ollama abierto; después desbloquea el caso.")
         duracion_ms = round((deps.reloj() - inicio) * 1000, 1)
 
+        # Cada intento que el Agente Consulta descartó (validador, base de datos, formato…) queda en la
+        # bitácora con su motivo: sin esto solo se veían dos llamadas al modelo sin saber por qué hubo dos.
+        fallidos = r.get("intentos_fallidos") or []
+        for f in fallidos:
+            repo.registrar_evento(caso_id, SQL_RECHAZADO, {
+                "sql": f.get("sql"), "motivo": f.get("error"), "intento": f.get("intento"),
+                "etapa": f.get("etapa")})
+
         if r["tipo"] == "aclaracion":
             opciones = " / ".join(r.get("opciones") or [])
             raise Bloqueo(f"Información insuficiente: el Agente Consulta pide aclarar: {r['pregunta']}"
@@ -237,7 +245,7 @@ def nodo_consulta(deps: Dependencias, limites: Limites):
         if r["tipo"] == "sin_datos":
             raise Bloqueo(f"Información insuficiente: {r['motivo']}")
         if r["tipo"] == "error":
-            if r.get("sql_rechazado"):
+            if r.get("sql_rechazado") and not fallidos:  # con intentos_fallidos ya quedó arriba
                 repo.registrar_evento(caso_id, SQL_RECHAZADO,
                                       {"sql": r["sql_rechazado"], "motivo": r["motivo"]})
             raise Bloqueo(f"El Agente Consulta no pudo generar un SQL válido: {r['motivo']}")
@@ -324,9 +332,9 @@ def nodo_normativo(deps: Dependencias, limites: Limites):
 
         fallas: list[Exception] = []
 
-        def recuperar(consulta, fecha, top_k):
+        def recuperar(consulta, fecha, top_k, **extra):  # palabras_clave y leyes llegan al recuperador
             try:
-                return base(consulta, fecha, top_k)
+                return llamar(base, consulta, fecha, top_k, **extra)
             except Exception as exc:  # una búsqueda fallida deja esa señal sin norma, no tumba el caso
                 fallas.append(exc)  # se registran juntas al final: un evento, no uno por señal
                 return []

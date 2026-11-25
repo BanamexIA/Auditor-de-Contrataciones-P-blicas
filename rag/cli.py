@@ -24,6 +24,9 @@ from rag.core import (
 ROOT = Path(__file__).resolve().parents[1]
 
 
+EMBED_BATCH = 32
+
+
 def build_client() -> OllamaEmbeddingClient:
     base_url, model = ollama_settings()
     return OllamaEmbeddingClient(base_url, model)
@@ -50,7 +53,13 @@ def command_ingest(jsonl_path: Path, sample: bool) -> None:
     except ValueError as exc:
         raise SystemExit(f"Invalid fragment file: {exc}") from exc
     client = build_client()
-    vectors, elapsed_ms = client.embed([chunk["contenido"] for chunk in chunks])
+    # En tandas: con todo un corpus (200+ fragmentos) en una sola petición, una laptop ocupada pasaba
+    # el tiempo límite de Ollama (2026-11-24). La carga a la base sigue siendo una sola, al final.
+    vectors, elapsed_ms = [], 0.0
+    for inicio in range(0, len(chunks), EMBED_BATCH):
+        lote, ms = client.embed([chunk["contenido"] for chunk in chunks[inicio:inicio + EMBED_BATCH]])
+        vectors += lote
+        elapsed_ms += ms
     inserted = ingest_chunks(chunks, vectors, client.model)
     print(json.dumps(
         {

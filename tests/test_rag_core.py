@@ -163,7 +163,8 @@ class RetrievalVigencyTests(unittest.TestCase):
         self.assertIn("d.metadata AS document_metadata", query)
         self.assertEqual(
             conn.active_cursor.parameters,
-            ("[0.25,0.5]", date(2024, 6, 1), date(2024, 6, 1), date(2024, 6, 1), None, None, "[0.25,0.5]", 3),
+            ("[0.25,0.5]", date(2024, 6, 1), date(2024, 6, 1), date(2024, 6, 1), None, None, None, None,
+             "[0.25,0.5]", 3),
         )
 
     def test_types_are_filtered_before_the_limit(self):

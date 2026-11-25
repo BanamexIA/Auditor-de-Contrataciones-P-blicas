@@ -26,7 +26,7 @@ CREATE INDEX IF NOT EXISTS idx_chunks_texto_es ON rag.chunks USING gin (to_tsvec
 (Sin el índice la búsqueda funciona igual, solo más lenta; el corpus es chico.)
 Si ya cargaste la muestra de 10 fragmentos, bórrala antes para no duplicar los artículos (la muestra y el corpus completo son el mismo PDF).
 
-## Lo que falta (D2): reglamento, LOPSRM y art. 69-B del CFF
+## Lo que faltaba (D2): reglamento, LOPSRM y art. 69-B del CFF (completado el 2026-11-24, ver abajo)
 No pude descargarlos desde mi entorno (sin acceso a diputados.gob.mx). Descarga los PDF oficiales (Cámara de Diputados, sección de leyes
 federales y de reglamentos) y corre, con los datos que trae la portada de cada PDF (fecha de publicación, de entrada en vigor y de abrogación):
 ```powershell
@@ -82,3 +82,33 @@ Sin umbral, un contrato de 2015 con la señal del 69-B citaba los arts. 11, 1 y 
 (0.270 contra 0.287): si se agregan leyes, conviene volver a medir, o filtrar por ley en `MAPA_SENAL_NORMA`.
 
 **`chunk_normas.py` en Windows:** `pdftotext` usa Latin-1 por defecto; ahora se le pide `-enc UTF-8`.
+
+## Actualización 2026-11-24 (2): LOPSRM, reglamentos y ley por señal
+
+| Archivo | Ley (`ley`) | Versión | Vigente desde | Fragmentos |
+|---|---|---|---|---|
+| `lopsrm_vigente.jsonl` | `LOPSRM` | Texto consolidado; última reforma DOF 14-11-2025 | 2000-03-05 | 204 (133 artículos) |
+| `reg_laassp_vigente.jsonl` | `RLAASSP` | Nuevo Reglamento DOF 18-12-2025; última reforma DOF 27-03-2026 | 2025-12-19 | 287 (197 artículos) |
+| `reg_lopsrm_vigente.jsonl` | `RLOPSRM` | Texto consolidado; última reforma DOF 24-02-2023 | 2010-07-29 | 401 (298 artículos) |
+
+PDF oficiales en `rag/` (`LOPSRM.pdf`, `Reg_LAASSP.pdf`, `Reg_LOPSRM.pdf`), de diputados.gob.mx. La LOPSRM no tuvo ley
+nueva en 2025: es la de 2000 con reformas; igual que la LAASSP abrogada, el texto es el consolidado, así que un artículo
+reformado después de la fecha de un contrato puede no ser el texto que regía entonces (cada fragmento conserva sus notas
+"reformado DOF …"). **Falta** el Reglamento de la LAASSP de 2010 (abrogado el 2025-12-19): sin él, los contratos de
+adquisiciones anteriores a esa fecha solo citan la ley, no el reglamento.
+
+**Cada señal cita solo su ley** (`MAPA_SENAL_NORMA` en `agente_deteccion/normativo.py`): `ADJ_DIRECTA_RECURRENTE` usa la ley
+del contrato y su reglamento (`LAASSP`+`RLAASSP` o `LOPSRM`+`RLOPSRM`, tabla `REGLAMENTOS`) y `PROVEEDOR_LISTA_69B`
+solo `CFF`. El filtro va en el SQL (`retrieve(..., leyes=...)`), antes del `LIMIT`. Antes, una obra pública citaba la LAASSP.
+Si un contrato no tiene ley registrada (64,701 del histórico), no se filtra.
+
+**`chunk_normas.py`:** un artículo sin sangría después de una línea en blanco o de una nota de reforma ahora sí se reconoce.
+Con el `pdftotext` de Windows, el artículo que sigue a "Artículo adicionado DOF …" se pegaba al anterior (en la LOPSRM
+faltaban los arts. 2, 7, 30, 85, 86 y 92). Los `.jsonl` de la LAASSP no tenían el problema y no se regeneraron.
+
+Cargar (con Ollama para los embeddings; cada archivo reemplaza sus fragmentos, no duplica):
+```powershell
+python -m rag.cli ingest --jsonl rag\corpus\lopsrm_vigente.jsonl
+python -m rag.cli ingest --jsonl rag\corpus\reg_laassp_vigente.jsonl
+python -m rag.cli ingest --jsonl rag\corpus\reg_lopsrm_vigente.jsonl
+```

@@ -26,6 +26,8 @@ ARTICULO = re.compile(
 TRANSITORIOS = re.compile(r"^\s*(ART[ÍI]CULOS\s+)?TRANSITORIOS?\s*$", re.IGNORECASE)
 TITULO = re.compile(r"^\s*(T[ÍI]TULO|Cap[ií]tulo|Secci[oó]n)\s+(\S+(?:\s+\S+)?)\s*$", re.IGNORECASE)
 PAGINA = re.compile(r"^\s*(P[áa]gina\s+)?\d+(\s+de\s+\d+)?\s*$", re.IGNORECASE)
+# Nota de reforma alineada a la derecha ("Artículo adicionado DOF 16-04-2025"): lo que sigue empieza un párrafo nuevo.
+NOTA_REFORMA = re.compile(r"(adicionad|reformad|derogad)[oa]s?\b.*\bDOF\b", re.IGNORECASE)
 
 
 def texto_por_paginas(pdf: Path) -> list[list[str]]:
@@ -75,13 +77,18 @@ def partir(parrafos: list[str], max_chars: int) -> list[str]:
 def extraer_articulos(paginas: list[list[str]]) -> tuple[list[dict], bool]:
     """Devuelve ([{articulo, pagina, ruta, lineas}], corto_en_transitorios)."""
     arts, actual, ruta, corto = [], None, [], False
+    inicio_de_parrafo = True   # la línea anterior estaba en blanco o era una nota de reforma
     for n, lineas in enumerate(paginas, start=1):
         for l in lineas:
             if TRANSITORIOS.match(l) and arts:
                 corto = True
                 break
             m = ARTICULO.match(l)
-            if m and (_sangria(l) >= 1 or actual is None):
+            # Sin sangría solo cuenta si empieza párrafo: así "Artículo 5 de esta Ley…" al inicio de un renglón
+            # cortado no abre un artículo, pero "Artículo 2." después de una nota de reforma sí (LOPSRM, 2026-11-24).
+            nuevo = m and (_sangria(l) >= 1 or actual is None or inicio_de_parrafo)
+            inicio_de_parrafo = not l.strip() or bool(NOTA_REFORMA.search(l))
+            if nuevo:
                 etiqueta = re.sub(r"\s+", " ", m.group(1)).replace("Articulo", "Artículo")
                 actual = {"articulo": etiqueta, "numero": int(m.group(2)), "pagina": n, "ruta": " > ".join(ruta),
                           "lineas": [" " * 4 + m.group(4)] if m.group(4) else []}

@@ -71,5 +71,19 @@ class Chunker(unittest.TestCase):
         self.assertTrue(any("más de una vez" in a for a in revisar(mk(1, 2, 2), 1800)))
 
 
+class ArticuloSinSangria(unittest.TestCase):
+    """2026-11-24: en la LOPSRM, el artículo que sigue a una nota de reforma viene sin sangría y se pegaba al anterior."""
+
+    def test_despues_de_una_nota_de_reforma_o_linea_en_blanco_empieza_articulo(self):
+        pagina = ["   Artículo 1.- Texto del uno.",
+                  "                                   Artículo adicionado DOF 16-04-2025",
+                  "Artículo 2. Para los efectos de la presente Ley, se entenderá por:",
+                  "",
+                  "Artículo 3. Texto del tres, que cita el",
+                  "Artículo 5 de esta Ley en un renglón cortado."]
+        arts, _ = extraer_articulos([pagina])
+        self.assertEqual([a["articulo"] for a in arts], ["Artículo 1", "Artículo 2", "Artículo 3"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -563,6 +563,7 @@ def retrieve(
     top_k: int,
     contract_date: date | None = None,
     tipos: Sequence[str] | None = None,
+    leyes: Sequence[str] | None = None,
 ) -> tuple[list[dict[str, Any]], float]:
     """tipos: solo esos tipos de documento (p. ej. ("normas",)). Se filtra ANTES del LIMIT: si se filtrara
     después, los top_k más cercanos podían ser todos documentación y la lista quedaba vacía (2026-11-24)."""
@@ -591,11 +592,12 @@ def retrieve(
                    )
                ))
               AND (%s::text[] IS NULL OR d.tipo = ANY(%s::text[]))
+              AND (%s::text[] IS NULL OR d.ley = ANY(%s::text[]))
             ORDER BY c.embedding <=> %s::vector
             LIMIT %s
             """,
             (vector_text, contract_date, contract_date, contract_date, _tipos(tipos), _tipos(tipos),
-             vector_text, top_k),
+             _tipos(leyes), _tipos(leyes), vector_text, top_k),
         )
         columns = [description.name for description in cursor.description]
         rows = [_fila(columns, row) for row in cursor.fetchall()]
@@ -635,7 +637,8 @@ def _tipos(tipos: Sequence[str] | None) -> list[str] | None:
     return list(tipos) if tipos else None
 
 
-def retrieve_text(conn, vector, top_k, contract_date=None, texto_consulta=None, palabras_clave=None, tipos=None):
+def retrieve_text(conn, vector, top_k, contract_date=None, texto_consulta=None, palabras_clave=None, tipos=None,
+                  leyes=None):
     """Búsqueda por palabras clave (texto completo en español) con el MISMO filtro de vigencia que retrieve()."""
     expr, params = _consulta_texto(texto_consulta, palabras_clave)
     sql_text = f"""
@@ -651,13 +654,14 @@ def retrieve_text(conn, vector, top_k, contract_date=None, texto_consulta=None, 
         JOIN rag.documentos AS d ON d.id = c.documento_id, q
         WHERE to_tsvector('spanish', c.contenido) @@ q.t AND {_VIGENCIA_SQL}
           AND (%(tipos)s::text[] IS NULL OR d.tipo = ANY(%(tipos)s::text[]))
+          AND (%(leyes)s::text[] IS NULL OR d.ley = ANY(%(leyes)s::text[]))
         ORDER BY puntaje_texto DESC, c.id
         LIMIT %(n)s"""
     # los %s de la tsquery son posicionales y el resto nombrados: se pasan todos como nombrados
     for i in range(len(params)):
         sql_text = sql_text.replace("%s", f"%(p{i})s", 1)
     args = {f"p{i}": v for i, v in enumerate(params)}
-    args.update(vec=format_vector(vector), fecha=contract_date, n=top_k, tipos=_tipos(tipos))
+    args.update(vec=format_vector(vector), fecha=contract_date, n=top_k, tipos=_tipos(tipos), leyes=_tipos(leyes))
     with conn.cursor() as cursor:
         cursor.execute(sql_text, args)
         columns = [description.name for description in cursor.description]
@@ -680,7 +684,7 @@ def fusionar_rrf(por_vector: list[dict], por_texto: list[dict], k: int = RRF_K) 
 
 
 def retrieve_hybrid(conn, vector, top_k, contract_date=None, texto_consulta=None, palabras_clave=None,
-                    candidatos=20, tipos=None) -> tuple[list[dict[str, Any]], float]:
+                    candidatos=20, tipos=None, leyes=None) -> tuple[list[dict[str, Any]], float]:
     """Búsqueda híbrida (D5): vectores + palabras clave, fusionadas con RRF, con el filtro de vigencia a la fecha del contrato.
 
     Cada fila trae distancia_coseno (para el umbral de similitud), rank_vector, rank_texto, puntaje_rrf y coincide_texto.
@@ -688,9 +692,9 @@ def retrieve_hybrid(conn, vector, top_k, contract_date=None, texto_consulta=None
     if top_k < 1:
         raise ValueError("top_k must be at least 1.")
     started = time.perf_counter()
-    por_vector, _ = retrieve(conn, vector, max(candidatos, top_k), contract_date, tipos)
+    por_vector, _ = retrieve(conn, vector, max(candidatos, top_k), contract_date, tipos, leyes)
     por_texto = retrieve_text(conn, vector, max(candidatos, top_k), contract_date, texto_consulta, palabras_clave,
-                              tipos)
+                              tipos, leyes)
     filas = fusionar_rrf(por_vector, por_texto)[:top_k]
     return filas, (time.perf_counter() - started) * 1000
 

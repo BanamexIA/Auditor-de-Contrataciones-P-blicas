@@ -122,6 +122,30 @@ class UmbralNormasTest(unittest.TestCase):
                 self.assertEqual(umbral_distancia_rag(), esperado)
 
 
+class SqlRechazadoTest(unittest.TestCase):
+    """2026-11-24: la bitácora mostraba dos llamadas al modelo sin decir por qué se descartó la primera."""
+
+    def test_cada_intento_descartado_queda_con_su_motivo(self):
+        esc = Escenario()
+        r = esc.respuesta_sql()
+        r["intentos_fallidos"] = [{"intento": 1, "etapa": "validador", "sql": "SELECT ... JOIN 69b",
+                                   "error": "La pregunta no menciona el listado 69-B"}]
+        esc.respuestas = [r]
+        self.assertEqual(esc.correr()["estado"], e.EN_REVISION)
+        ev = esc.repo.eventos(esc.caso["id"], "sql_rechazado")
+        self.assertEqual(len(ev), 1)
+        self.assertEqual((ev[0]["detalle"]["intento"], ev[0]["detalle"]["etapa"]), (1, "validador"))
+        self.assertIn("69-B", ev[0]["detalle"]["motivo"])
+
+    def test_un_error_final_no_se_registra_dos_veces(self):
+        esc = Escenario()
+        fallido = {"intento": 2, "etapa": "base", "sql": "SELECT x", "error": "PostgreSQL rechazó"}
+        esc.respuestas = [{"tipo": "error", "motivo": "2 intentos", "sql_rechazado": "SELECT x",
+                           "intentos_fallidos": [dict(fallido, intento=1), fallido]}]
+        self.assertEqual(esc.correr()["estado"], e.BLOQUEADO)
+        self.assertEqual(len(esc.repo.eventos(esc.caso["id"], "sql_rechazado")), 2)
+
+
 class ApiTest(unittest.TestCase):
     def setUp(self):
         from backend.app import create_app

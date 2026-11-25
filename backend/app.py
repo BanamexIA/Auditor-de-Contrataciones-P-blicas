@@ -5,6 +5,7 @@ from sqlalchemy import URL, Engine, create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 from werkzeug.exceptions import HTTPException
 
+from backend.front import configurar_front
 from backend.agentes.api import bp as agentes_bp
 from backend.agentes.repositorio import RepositorioAgentes, RepositorioAgentesSQL
 from backend.agentes.servicio import MonitorAgentes
@@ -102,6 +103,7 @@ def create_app(
     app.register_blueprint(agentes_bp)
     app.register_blueprint(demo_bp)
     app.register_blueprint(orquestador_bp)
+    configurar_front(app)  # FRONT_DIR: el front compilado en el mismo origen (backend/front.py)
     _errores_en_json(app)
     return app
 

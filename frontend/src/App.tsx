@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from 'react-oidc-context';
-import { auth } from './api/auditor';
+import { auditor, auth } from './api/auditor';
 import { ApiError, session } from './api/client';
 import { SplitPane } from './components/SplitPane';
 import { urlSalidaCognito, type CognitoPublico } from './features/auth/cognito';
@@ -8,8 +8,9 @@ import { Login } from './features/auth/Login';
 import { ChatPanel } from './features/chat/ChatPanel';
 import { PdfWorkspace } from './features/pdf/PdfWorkspace';
 import { BitacoraPanel } from './features/bitacora/BitacoraPanel';
+import { CasosPanel } from './features/casos/CasosPanel';
 import { SenalesPanel } from './features/senales/SenalesPanel';
-import type { ReporteRef, Usuario } from './types/auditor';
+import type { Caso, ReporteRef, Usuario } from './types/auditor';
 
 type Sesion =
   | { estado: 'cargando' }
@@ -17,7 +18,26 @@ type Sesion =
   | { estado: 'lista'; usuario: Usuario | null }
   | { estado: 'error'; mensaje: string };
 
-type Pestana = 'reporte' | 'senales' | 'bitacora';
+type Pestana = 'casos' | 'reporte' | 'senales' | 'bitacora';
+
+/** El caso abierto sobrevive a una recarga de la página (solo en esta pestaña del navegador). */
+const CLAVE_ABIERTO = 'auditor.casoAbierto';
+function leerAbierto(): { casoId: string; reporte: ReporteRef | null } | null {
+  try {
+    const v = sessionStorage.getItem(CLAVE_ABIERTO);
+    return v ? JSON.parse(v) : null;
+  } catch {
+    return null;
+  }
+}
+function guardarAbierto(casoId: string | null, reporte: ReporteRef | null) {
+  try {
+    if (casoId) sessionStorage.setItem(CLAVE_ABIERTO, JSON.stringify({ casoId, reporte }));
+    else sessionStorage.removeItem(CLAVE_ABIERTO);
+  } catch {
+    /* sin almacenamiento: solo se pierde el caso abierto al recargar */
+  }
+}
 
 /** Acciones de Cognito que la app necesita (solo existen si el backend lo tiene configurado). */
 interface AccionesCognito {
@@ -80,10 +100,13 @@ function AppConCognito({ cognito }: { cognito: CognitoPublico }) {
 
 function AppBase({ cognito }: { cognito: AccionesCognito | null }) {
   const [sesion, setSesion] = useState<Sesion>({ estado: 'cargando' });
-  const [reporte, setReporte] = useState<ReporteRef | null>(null);
-  const [pestana, setPestana] = useState<Pestana>('reporte');
+  const abierto = leerAbierto();
+  const [reporte, setReporte] = useState<ReporteRef | null>(abierto?.reporte ?? null);
+  const [pestana, setPestana] = useState<Pestana>(abierto ? (abierto.reporte ? 'reporte' : 'bitacora') : 'casos');
   // Caso que miran Señales y Bitácora: el del reporte abierto o el que se eligió en el chat (aunque esté bloqueado).
-  const [casoActivo, setCasoActivo] = useState<string | null>(null);
+  const [casoActivo, setCasoActivo] = useState<string | null>(abierto?.casoId ?? null);
+
+  useEffect(() => guardarAbierto(casoActivo, reporte), [casoActivo, reporte]);
 
   const iniciar = useCallback(async () => {
     setSesion({ estado: 'cargando' });
@@ -126,6 +149,23 @@ function AppBase({ cognito }: { cognito: AccionesCognito | null }) {
 
   const verBitacora = useCallback((casoId: string) => {
     setCasoActivo(casoId);
+    setPestana('bitacora');
+  }, []);
+
+  /** Desde la lista: abre el último reporte si lo hay; si no (p. ej. bloqueado), su bitácora. */
+  const abrirCaso = useCallback(async (caso: Caso) => {
+    setCasoActivo(caso.id);
+    try {
+      const versiones = await auditor.reportes(caso.id);
+      if (versiones.length) {
+        setReporte({ casoId: caso.id, version: Math.max(...versiones.map((r) => r.version)), titulo: caso.solicitud });
+        setPestana('reporte');
+        return;
+      }
+    } catch {
+      /* sin reportes legibles: se muestra la bitácora */
+    }
+    setReporte(null);
     setPestana('bitacora');
   }, []);
 
@@ -174,6 +214,9 @@ function AppBase({ cognito }: { cognito: AccionesCognito | null }) {
         right={
           <div className="derecha">
             <nav className="pestanas" role="tablist">
+              <button role="tab" aria-selected={pestana === 'casos'} className={pestana === 'casos' ? 'active' : ''} onClick={() => setPestana('casos')}>
+                Casos
+              </button>
               <button role="tab" aria-selected={pestana === 'reporte'} className={pestana === 'reporte' ? 'active' : ''} onClick={() => setPestana('reporte')}>
                 Reporte
               </button>
@@ -184,6 +227,9 @@ function AppBase({ cognito }: { cognito: AccionesCognito | null }) {
                 Bitácora
               </button>
             </nav>
+            <div className="pestana" hidden={pestana !== 'casos'}>
+              <CasosPanel usuario={sesion.usuario} casoActivo={casoActivo} visible={pestana === 'casos'} onAbrir={(c) => void abrirCaso(c)} />
+            </div>
             {/* El visor se mantiene montado para no recargar el PDF al cambiar de pestaña. */}
             <div className="pestana" hidden={pestana !== 'reporte'}>
               <PdfWorkspace reporte={reporte} />

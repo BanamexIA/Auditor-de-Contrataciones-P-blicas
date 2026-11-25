@@ -16,14 +16,18 @@ from datetime import date
 # Qué buscar para cada tipo de señal. 'consulta' = texto que se vectoriza; None = no hay norma aplicable.
 # 'referencias_preferidas': [(ley, articulo)] que Aarón puede fijar tras revisar el corpus (se priorizan).
 # No se escriben números de artículo aquí: dependen de la versión de cada ley y deben salir del corpus.
+# Qué ley puede citar cada señal: 'leyes' fija la lista; 'ley_del_contrato' usa la ley de sus contratos (LAASSP para
+# adquisiciones, LOPSRM para obra pública…). Sin esto, una obra pública citaba la LAASSP (2026-11-24).
 MAPA_SENAL_NORMA = {
     "ADJ_DIRECTA_RECURRENTE": {
         "consulta": "supuestos de excepción a la licitación pública y procedencia de la adjudicación directa",
         "palabras_clave": ["adjudicación directa", "excepción a la licitación pública", "casos de excepción"],
+        "ley_del_contrato": True,
         "referencias_preferidas": []},
     "PROVEEDOR_LISTA_69B": {
         "consulta": "presunción de operaciones inexistentes y listado de contribuyentes del artículo 69-B del Código Fiscal de la Federación",
         "palabras_clave": ["69-B", "operaciones inexistentes", "comprobantes fiscales"],
+        "leyes": ["CFF"],
         "referencias_preferidas": []},
     "INCONSISTENCIA_FUENTES": {"consulta": None, "referencias_preferidas": [],
                                "motivo": "es una discrepancia entre fuentes de datos; no hay norma que la defina"},
@@ -49,15 +53,19 @@ def recuperar_normas(senales: list[dict], contratos: list[dict], recuperador, to
         if fecha is None:
             sin_norma.append({"senal_id": s["senal_id"], "motivo": "sin fecha de contrato; no se puede determinar la versión vigente"})
             continue
-        filas = recuperador(regla["consulta"], fecha, top_k, **_extra(recuperador, regla))
+        leyes = _leyes(regla, s, por_id)
+        filas = recuperador(regla["consulta"], fecha, top_k, **_extra(recuperador, regla, leyes))
+        if leyes:   # también aquí, por si el recuperador no filtra por ley
+            filas = [f for f in filas if f.get("ley") in leyes]
         recuperados = len(filas)
         if umbral_distancia is not None:
             filas = [f for f in filas if f.get("distancia") is None or f["distancia"] <= umbral_distancia]
         pref = set(map(tuple, regla.get("referencias_preferidas", [])))
         filas.sort(key=lambda f: 0 if (f.get("ley"), f.get("articulo")) in pref else 1)   # estable: respeta el orden del recuperador (RRF)
         if not filas:
+            cual = f" de {', '.join(leyes)}" if leyes else ""
             motivo = (f"ningún fragmento vigente al {fecha.isoformat()} supera el umbral de similitud" if recuperados
-                      else f"el corpus no tiene fragmentos vigentes al {fecha.isoformat()} para esta señal")
+                      else f"el corpus no tiene fragmentos vigentes al {fecha.isoformat()}{cual} para esta señal")
             sin_norma.append({"senal_id": s["senal_id"], "motivo": motivo})
             continue
         for f in filas:
@@ -71,16 +79,40 @@ def recuperar_normas(senales: list[dict], contratos: list[dict], recuperador, to
     return normas, sin_norma
 
 
-def _extra(recuperador, regla) -> dict:
-    claves = regla.get("palabras_clave")
-    if not claves:
-        return {}
+def llamar(recuperador, consulta, fecha, top_k, **extra):
+    """Llama al recuperador pasándole solo los argumentos opcionales que acepta (para envoltorios)."""
+    try:
+        ps = inspect.signature(recuperador).parameters
+    except (TypeError, ValueError):
+        return recuperador(consulta, fecha, top_k)
+    if not any(p.kind is inspect.Parameter.VAR_KEYWORD for p in ps.values()):
+        extra = {k: v for k, v in extra.items() if k in ps}
+    return recuperador(consulta, fecha, top_k, **extra)
+
+
+# Cada ley con su reglamento (las siglas son las de rag.documentos.ley; ver rag/corpus/README.md).
+REGLAMENTOS = {"LAASSP": "RLAASSP", "LOPSRM": "RLOPSRM"}
+
+
+def _leyes(regla, senal, por_id) -> list[str]:
+    """Leyes que la señal puede citar; [] = cualquiera (p. ej. contratos sin ley registrada)."""
+    if regla.get("leyes"):
+        return list(regla["leyes"])
+    if regla.get("ley_del_contrato"):
+        leyes = {por_id[i]["ley"] for i in senal["contratos_ids"] if i in por_id and por_id[i].get("ley")}
+        return sorted(leyes | {REGLAMENTOS[l] for l in leyes if l in REGLAMENTOS})
+    return []
+
+
+def _extra(recuperador, regla, leyes=()) -> dict:
+    """Argumentos opcionales que el recuperador acepta (palabras_clave, leyes)."""
     try:
         ps = inspect.signature(recuperador).parameters
     except (TypeError, ValueError):
         return {}
-    ok = "palabras_clave" in ps or any(p.kind is inspect.Parameter.VAR_KEYWORD for p in ps.values())
-    return {"palabras_clave": claves} if ok else {}
+    todos = any(p.kind is inspect.Parameter.VAR_KEYWORD for p in ps.values())
+    extra = {"palabras_clave": regla.get("palabras_clave"), "leyes": list(leyes) or None}
+    return {k: v for k, v in extra.items() if v and (todos or k in ps)}
 
 
 def _iso(v):
@@ -108,13 +140,14 @@ class RecuperadorPgvector:
             conn = connect_database()
         self.conn = conn
 
-    def __call__(self, consulta, fecha, top_k, palabras_clave=None):
+    def __call__(self, consulta, fecha, top_k, palabras_clave=None, leyes=None):
         from rag.core import retrieve, retrieve_hybrid
         vectores, _ = self.cliente.embed([consulta])
         if self.hibrida:
-            filas, _ = retrieve_hybrid(self.conn, vectores[0], top_k, fecha, consulta, palabras_clave, tipos=("normas",))
+            filas, _ = retrieve_hybrid(self.conn, vectores[0], top_k, fecha, consulta, palabras_clave,
+                                       tipos=("normas",), leyes=leyes)
         else:
-            filas, _ = retrieve(self.conn, vectores[0], top_k, fecha, tipos=("normas",))
+            filas, _ = retrieve(self.conn, vectores[0], top_k, fecha, tipos=("normas",), leyes=leyes)
         return [{"id": r["id"], "ley": r.get("ley"), "version": r.get("version"),
                  "fecha_entrada_vigor": r.get("fecha_entrada_vigor"), "fecha_abrogacion": r.get("fecha_abrogacion"),
                  "contenido": r["contenido"], "articulo": (r.get("metadata") or {}).get("articulo"),

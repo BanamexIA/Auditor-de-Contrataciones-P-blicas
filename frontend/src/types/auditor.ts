@@ -23,6 +23,8 @@ export interface Caso {
   estado_previo: EstadoCaso | null;
   motivo_bloqueo: string | null;
   creado_por: string | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export type Fila = Record<string, unknown>;
