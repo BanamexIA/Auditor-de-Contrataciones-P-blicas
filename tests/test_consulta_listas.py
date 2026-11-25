@@ -101,5 +101,22 @@ class CruceNoPedidoCon69bTest(unittest.TestCase):
         self.assertEqual(r["tipo"], "sql")
 
 
+
+class TipoContratacionTest(unittest.TestCase):
+    """2026-11-25: «adjudicaciones directas de obra pública de ComprasMX 2026» dio 0 filas por el valor."""
+
+    def test_un_valor_que_no_existe_se_rechaza_con_la_pista(self):
+        from agents.consulta.validator import SQLValidationError
+        for valor in ("OBRA PUBLICA", "obra pública", "Obra publica"):
+            with self.subTest(valor=valor), self.assertRaisesRegex(SQLValidationError, "UPPER\(tipo_contratacion\)"):
+                validate_sql(f"SELECT codigo_contrato FROM {CONTRATOS} WHERE tipo_contratacion = '{valor}' LIMIT 10")
+
+    def test_los_valores_reales_y_upper_pasan(self):
+        for cond in ("tipo_contratacion = 'OBRA PÚBLICA'", "tipo_contratacion = 'Obra Pública'",
+                     "UPPER(tipo_contratacion) = 'OBRA PÚBLICA'", "ley = 'LOPSRM'"):
+            with self.subTest(cond=cond):
+                validate_sql(f"SELECT codigo_contrato FROM {CONTRATOS} WHERE {cond} LIMIT 10")
+
+
 if __name__ == "__main__":
     unittest.main()

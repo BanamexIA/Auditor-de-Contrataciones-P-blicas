@@ -70,6 +70,7 @@ DATA_RULES = """Reglas de los datos:
 - importe se suma por fuente y por moneda. Es importe registrado, no gasto pagado.
 - «Nulo», «sin dato» o «sin registrar» es IS NULL, no cero: importe IS NULL es un contrato sin importe registrado e importe = 0 es un importe en cero. Si eliges una lectura que la pregunta no deja clara, dila en supuestos.
 - tipo_procedimiento_norm es una clasificación preliminar con los valores adjudicacion_directa, invitacion_tres_personas, licitacion_publica, otro y sin_dato.
+- tipo_contratacion dice qué se contrata y se escribe distinto en cada fuente: en ComprasMX 'ADQUISICIONES', 'SERVICIOS', 'ARRENDAMIENTOS', 'OBRA PÚBLICA' y 'SERVICIOS RELACIONADOS CON LA OBRA'; en el histórico 'Adquisiciones', 'Servicios', 'Arrendamientos', 'Obra Pública' y 'Servicios Relacionados con la OP'. Para obra pública usa UPPER(tipo_contratacion) = 'OBRA PÚBLICA'.
 - Los porcentajes se calculan desde conteos, con NULLIF en el denominador. Nunca sumes ni promedies porcentajes.
 - clean.v_coincidencias_69b_agente tiene una fila por contrato, no por empresa. Al unirla con clean.v_contratos_agente por codigo_contrato, cuenta COUNT(DISTINCT codigo_contrato). nivel_confianza 'alta' es RFC exacto y 'media' es solo nombre. La vista no tiene la situación del contribuyente: no la afirmes.
 - Ordena los rankings por la métrica y después por el nombre."""
