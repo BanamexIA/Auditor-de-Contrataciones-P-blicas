@@ -50,12 +50,15 @@ def recuperar_normas(senales: list[dict], contratos: list[dict], recuperador, to
             sin_norma.append({"senal_id": s["senal_id"], "motivo": "sin fecha de contrato; no se puede determinar la versión vigente"})
             continue
         filas = recuperador(regla["consulta"], fecha, top_k, **_extra(recuperador, regla))
+        recuperados = len(filas)
         if umbral_distancia is not None:
             filas = [f for f in filas if f.get("distancia") is None or f["distancia"] <= umbral_distancia]
         pref = set(map(tuple, regla.get("referencias_preferidas", [])))
         filas.sort(key=lambda f: 0 if (f.get("ley"), f.get("articulo")) in pref else 1)   # estable: respeta el orden del recuperador (RRF)
         if not filas:
-            sin_norma.append({"senal_id": s["senal_id"], "motivo": f"ningún fragmento vigente al {fecha.isoformat()} supera el umbral de similitud"})
+            motivo = (f"ningún fragmento vigente al {fecha.isoformat()} supera el umbral de similitud" if recuperados
+                      else f"el corpus no tiene fragmentos vigentes al {fecha.isoformat()} para esta señal")
+            sin_norma.append({"senal_id": s["senal_id"], "motivo": motivo})
             continue
         for f in filas:
             normas.append({
@@ -109,9 +112,9 @@ class RecuperadorPgvector:
         from rag.core import retrieve, retrieve_hybrid
         vectores, _ = self.cliente.embed([consulta])
         if self.hibrida:
-            filas, _ = retrieve_hybrid(self.conn, vectores[0], top_k, fecha, consulta, palabras_clave)
+            filas, _ = retrieve_hybrid(self.conn, vectores[0], top_k, fecha, consulta, palabras_clave, tipos=("normas",))
         else:
-            filas, _ = retrieve(self.conn, vectores[0], top_k, fecha)
+            filas, _ = retrieve(self.conn, vectores[0], top_k, fecha, tipos=("normas",))
         return [{"id": r["id"], "ley": r.get("ley"), "version": r.get("version"),
                  "fecha_entrada_vigor": r.get("fecha_entrada_vigor"), "fecha_abrogacion": r.get("fecha_abrogacion"),
                  "contenido": r["contenido"], "articulo": (r.get("metadata") or {}).get("articulo"),

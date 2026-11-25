@@ -88,5 +88,16 @@ def dependencias_reales(repo, repo_agentes, log: Callable[[str], None] | None = 
         crear_recuperador=crear_recuperador,
         generar_reporte=generar_reporte,
         evaluar_calidad=evaluar_calidad,
+        umbral_distancia=umbral_distancia_rag(),
         log=log or (lambda texto: None),
     )
+
+
+def umbral_distancia_rag() -> float | None:
+    """RAG_UMBRAL_DISTANCIA del entorno; vacío usa el calibrado (0.28) y 'ninguno' lo desactiva."""
+    valor = os.environ.get("RAG_UMBRAL_DISTANCIA", "").strip().lower()
+    if not valor:
+        return 0.28
+    if valor in ("ninguno", "none"):
+        return None
+    return float(valor)

@@ -562,7 +562,10 @@ def retrieve(
     vector: Sequence[float],
     top_k: int,
     contract_date: date | None = None,
+    tipos: Sequence[str] | None = None,
 ) -> tuple[list[dict[str, Any]], float]:
+    """tipos: solo esos tipos de documento (p. ej. ("normas",)). Se filtra ANTES del LIMIT: si se filtrara
+    después, los top_k más cercanos podían ser todos documentación y la lista quedaba vacía (2026-11-24)."""
     if top_k < 1:
         raise ValueError("top_k must be at least 1.")
     vector_text = format_vector(vector)
@@ -578,7 +581,7 @@ def retrieve(
                    c.embedding <=> %s::vector AS distancia_coseno
             FROM rag.chunks AS c
             JOIN rag.documentos AS d ON d.id = c.documento_id
-            WHERE d.tipo <> 'normas'
+            WHERE (d.tipo <> 'normas'
                OR (
                    %s::date IS NOT NULL
                    AND d.fecha_entrada_vigor <= %s::date
@@ -586,14 +589,16 @@ def retrieve(
                        d.fecha_abrogacion IS NULL
                        OR %s::date < d.fecha_abrogacion
                    )
-               )
+               ))
+              AND (%s::text[] IS NULL OR d.tipo = ANY(%s::text[]))
             ORDER BY c.embedding <=> %s::vector
             LIMIT %s
             """,
-            (vector_text, contract_date, contract_date, contract_date, vector_text, top_k),
+            (vector_text, contract_date, contract_date, contract_date, _tipos(tipos), _tipos(tipos),
+             vector_text, top_k),
         )
         columns = [description.name for description in cursor.description]
-        rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        rows = [_fila(columns, row) for row in cursor.fetchall()]
     elapsed_ms = (time.perf_counter() - started) * 1000
     return rows, elapsed_ms
 
@@ -616,7 +621,21 @@ def _consulta_texto(texto_consulta: str | None, palabras_clave: Sequence[str] | 
     return "replace(plainto_tsquery('spanish', %s)::text, '&', '|')::tsquery", [texto_consulta or ""]
 
 
-def retrieve_text(conn, vector, top_k, contract_date=None, texto_consulta=None, palabras_clave=None):
+def _fila(columns: list[str], row: Any) -> dict[str, Any]:
+    """Acepta filas como tupla o como dict (conexiones con row_factory=dict_row, como la del orquestador).
+
+    Con dict_row, dict(zip(columns, row)) emparejaba cada columna con el NOMBRE de otra (iterar un dict da
+    sus llaves): 'tipo' valía "tipo", el filtro de normas lo descartaba todo y el RAG devolvía 0 fragmentos
+    sin ningún error (2026-11-24).
+    """
+    return dict(row) if isinstance(row, dict) else dict(zip(columns, row))
+
+
+def _tipos(tipos: Sequence[str] | None) -> list[str] | None:
+    return list(tipos) if tipos else None
+
+
+def retrieve_text(conn, vector, top_k, contract_date=None, texto_consulta=None, palabras_clave=None, tipos=None):
     """Búsqueda por palabras clave (texto completo en español) con el MISMO filtro de vigencia que retrieve()."""
     expr, params = _consulta_texto(texto_consulta, palabras_clave)
     sql_text = f"""
@@ -631,17 +650,18 @@ def retrieve_text(conn, vector, top_k, contract_date=None, texto_consulta=None, 
         FROM rag.chunks AS c
         JOIN rag.documentos AS d ON d.id = c.documento_id, q
         WHERE to_tsvector('spanish', c.contenido) @@ q.t AND {_VIGENCIA_SQL}
+          AND (%(tipos)s::text[] IS NULL OR d.tipo = ANY(%(tipos)s::text[]))
         ORDER BY puntaje_texto DESC, c.id
         LIMIT %(n)s"""
     # los %s de la tsquery son posicionales y el resto nombrados: se pasan todos como nombrados
     for i in range(len(params)):
         sql_text = sql_text.replace("%s", f"%(p{i})s", 1)
     args = {f"p{i}": v for i, v in enumerate(params)}
-    args.update(vec=format_vector(vector), fecha=contract_date, n=top_k)
+    args.update(vec=format_vector(vector), fecha=contract_date, n=top_k, tipos=_tipos(tipos))
     with conn.cursor() as cursor:
         cursor.execute(sql_text, args)
         columns = [description.name for description in cursor.description]
-        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+        return [_fila(columns, row) for row in cursor.fetchall()]
 
 
 def fusionar_rrf(por_vector: list[dict], por_texto: list[dict], k: int = RRF_K) -> list[dict]:
@@ -660,7 +680,7 @@ def fusionar_rrf(por_vector: list[dict], por_texto: list[dict], k: int = RRF_K) 
 
 
 def retrieve_hybrid(conn, vector, top_k, contract_date=None, texto_consulta=None, palabras_clave=None,
-                    candidatos=20) -> tuple[list[dict[str, Any]], float]:
+                    candidatos=20, tipos=None) -> tuple[list[dict[str, Any]], float]:
     """Búsqueda híbrida (D5): vectores + palabras clave, fusionadas con RRF, con el filtro de vigencia a la fecha del contrato.
 
     Cada fila trae distancia_coseno (para el umbral de similitud), rank_vector, rank_texto, puntaje_rrf y coincide_texto.
@@ -668,8 +688,9 @@ def retrieve_hybrid(conn, vector, top_k, contract_date=None, texto_consulta=None
     if top_k < 1:
         raise ValueError("top_k must be at least 1.")
     started = time.perf_counter()
-    por_vector, _ = retrieve(conn, vector, max(candidatos, top_k), contract_date)
-    por_texto = retrieve_text(conn, vector, max(candidatos, top_k), contract_date, texto_consulta, palabras_clave)
+    por_vector, _ = retrieve(conn, vector, max(candidatos, top_k), contract_date, tipos)
+    por_texto = retrieve_text(conn, vector, max(candidatos, top_k), contract_date, texto_consulta, palabras_clave,
+                              tipos)
     filas = fusionar_rrf(por_vector, por_texto)[:top_k]
     return filas, (time.perf_counter() - started) * 1000
 

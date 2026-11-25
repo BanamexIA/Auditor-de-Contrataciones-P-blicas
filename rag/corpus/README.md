@@ -52,3 +52,33 @@ Verificación hecha: contra un Postgres 16 con pgvector y un corpus de juguete d
 (a) en 2024 excluye el artículo abrogado y en 2005 solo devuelve el abrogado, (b) sin fecha no devuelve normas, (c) un fragmento que los
 vectores dejaban tercero sube al primer lugar de la lista de texto, y (d) "69-B" funciona como palabra clave. **Falta** medir con embeddings
 reales (Ollama) y las consultas de `rag/` si la híbrida mejora la recuperación, y calibrar el umbral de distancia.
+
+## Actualización 2026-11-24 (prueba con el orquestador)
+
+**CFF art. 69-B agregado** (`cff_69b.jsonl`, 4 fragmentos) desde el PDF oficial `rag/CFF.pdf` (texto vigente, última reforma
+DOF 09-04-2026). Vigencia: desde 2022-01-01, por la última reforma del artículo (párrafo adicionado DOF 12-11-2021). Los
+contratos anteriores a 2022 quedan sin norma del 69-B, porque el texto anterior no está en el corpus. Si se agrega, va como
+otra versión con su propia vigencia.
+```powershell
+python -m rag.chunk_normas --pdf rag/CFF.pdf --ley CFF --titulo "Código Fiscal de la Federación (texto vigente, última reforma DOF 09-04-2026), artículo 69-B" `
+    --version "Art. 69-B, última reforma del artículo DOF 12-11-2021" --publicacion 2021-11-12 --vigor 2022-01-01 `
+    --url https://www.diputados.gob.mx/LeyesBiblio/pdf/CFF.pdf --archivo-local rag/CFF.pdf --solo-articulos "69-B" --salida rag/corpus/cff_69b.jsonl
+```
+
+**Por qué el orquestador no encontraba normas.** `rag.core.retrieve` armaba cada fila con `dict(zip(columnas, fila))`; la
+conexión del orquestador usa `dict_row`, así que cada valor era el nombre de una columna, el filtro `tipo == "normas"` lo
+descartaba todo y la búsqueda devolvía 0 fragmentos sin error. Corregido en `rag.core._fila`. Además `retrieve`,
+`retrieve_text` y `retrieve_hybrid` aceptan `tipos=("normas",)`, que se aplica antes del `LIMIT`.
+
+**Umbral de distancia: 0.28** (en el orquestador; `RAG_UMBRAL_DISTANCIA` lo cambia y `ninguno` lo desactiva). Medido con
+`nomic-embed-text` sobre este corpus:
+
+| Consulta de la señal | Normas que aplican | Lo más cercano que no aplica |
+|---|---|---|
+| ADJ_DIRECTA_RECURRENTE | LAASSP arts. 54/55 (vigente) y 41/42 (abrogada): 0.20 a 0.27 | CFF: 0.375 o más |
+| PROVEEDOR_LISTA_69B | CFF 69-B: 0.253 y 0.270 | LAASSP: 0.287 en adelante |
+
+Sin umbral, un contrato de 2015 con la señal del 69-B citaba los arts. 11, 1 y 60 de la LAASSP. El margen en el 69-B es corto
+(0.270 contra 0.287): si se agregan leyes, conviene volver a medir, o filtrar por ley en `MAPA_SENAL_NORMA`.
+
+**`chunk_normas.py` en Windows:** `pdftotext` usa Latin-1 por defecto; ahora se le pide `-enc UTF-8`.

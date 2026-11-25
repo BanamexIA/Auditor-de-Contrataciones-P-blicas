@@ -57,6 +57,11 @@ class Dependencias:
     # False: el reporte usa las narrativas deterministas de respaldo (segundos en vez de una llamada
     # al modelo por señal). Señales, normas y cifras son las mismas.
     narrativa_llm: bool = True
+    # Distancia coseno máxima para citar un fragmento de norma (nomic-embed-text). Calibrada el 2026-11-24
+    # sobre el corpus LAASSP + CFF 69-B: las normas que aplican quedan entre 0.20 y 0.27 y la LAASSP frente a
+    # la señal del 69-B empieza en 0.287. Sin umbral, cada señal citaba los 3 fragmentos más cercanos
+    # aunque no tuvieran relación. None desactiva el filtro.
+    umbral_distancia: float | None = 0.28
     log: Callable[[str], None] = field(default=lambda texto: None)
 
 
@@ -339,7 +344,8 @@ def nodo_normativo(deps: Dependencias, limites: Limites):
         else:
             contratos = [{**c, "fecha": date.fromisoformat(c["fecha"][:10]) if c.get("fecha") else None}
                          for c in det["contratos"]]
-            normas, sin_norma = recuperar_normas(det["senales"], contratos, recuperar)
+            normas, sin_norma = recuperar_normas(det["senales"], contratos, recuperar,
+                                                 umbral_distancia=deps.umbral_distancia)
             normas, sin_norma, sospechosos = apartar_fragmentos_sospechosos(_json(normas), sin_norma)
             if fallas:
                 tipos = sorted({type(f).__name__ for f in fallas})

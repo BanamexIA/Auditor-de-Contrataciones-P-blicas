@@ -29,7 +29,9 @@ PAGINA = re.compile(r"^\s*(P[áa]gina\s+)?\d+(\s+de\s+\d+)?\s*$", re.IGNORECASE)
 
 
 def texto_por_paginas(pdf: Path) -> list[list[str]]:
-    out = subprocess.run(["pdftotext", "-layout", str(pdf), "-"], capture_output=True, text=True, check=True).stdout
+    # -enc UTF-8: en Windows pdftotext usa Latin-1 por defecto y la lectura como texto fallaba.
+    out = subprocess.run(["pdftotext", "-layout", "-enc", "UTF-8", str(pdf), "-"], capture_output=True,
+                         encoding="utf-8", check=True).stdout
     return [p.splitlines() for p in out.split("\f") if p.strip()]
 
 
