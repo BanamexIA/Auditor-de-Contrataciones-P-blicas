@@ -7,6 +7,7 @@ import { urlSalidaCognito, type CognitoPublico } from './features/auth/cognito';
 import { Login } from './features/auth/Login';
 import { ChatPanel } from './features/chat/ChatPanel';
 import { PdfWorkspace } from './features/pdf/PdfWorkspace';
+import { BitacoraPanel } from './features/bitacora/BitacoraPanel';
 import { SenalesPanel } from './features/senales/SenalesPanel';
 import type { ReporteRef, Usuario } from './types/auditor';
 
@@ -16,7 +17,7 @@ type Sesion =
   | { estado: 'lista'; usuario: Usuario | null }
   | { estado: 'error'; mensaje: string };
 
-type Pestana = 'reporte' | 'senales';
+type Pestana = 'reporte' | 'senales' | 'bitacora';
 
 /** Acciones de Cognito que la app necesita (solo existen si el backend lo tiene configurado). */
 interface AccionesCognito {
@@ -81,6 +82,8 @@ function AppBase({ cognito }: { cognito: AccionesCognito | null }) {
   const [sesion, setSesion] = useState<Sesion>({ estado: 'cargando' });
   const [reporte, setReporte] = useState<ReporteRef | null>(null);
   const [pestana, setPestana] = useState<Pestana>('reporte');
+  // Caso que miran Señales y Bitácora: el del reporte abierto o el que se eligió en el chat (aunque esté bloqueado).
+  const [casoActivo, setCasoActivo] = useState<string | null>(null);
 
   const iniciar = useCallback(async () => {
     setSesion({ estado: 'cargando' });
@@ -99,7 +102,9 @@ function AppBase({ cognito }: { cognito: AccionesCognito | null }) {
       if (err instanceof ApiError && err.status === 401) {
         cognito?.olvidar(err.message); // va después del aviso genérico de onUnauthorized: queda este
         setSesion({ estado: 'sin_sesion', aviso: err.message });
-      } else if (!session.token) setSesion({ estado: 'sin_sesion' });
+      } else if (err instanceof ApiError && (err.status === 0 || err.status >= 500))
+        setSesion({ estado: 'error', mensaje: 'No hay conexión con el backend. Revisa el túnel SSH y que el backend esté encendido.' });
+      else if (!session.token) setSesion({ estado: 'sin_sesion' });
       else setSesion({ estado: 'error', mensaje: (err as Error).message });
     }
   }, []);
@@ -115,12 +120,19 @@ function AppBase({ cognito }: { cognito: AccionesCognito | null }) {
 
   const abrirReporte = useCallback((r: ReporteRef) => {
     setReporte(r);
+    setCasoActivo(r.casoId);
     setPestana('reporte');
+  }, []);
+
+  const verBitacora = useCallback((casoId: string) => {
+    setCasoActivo(casoId);
+    setPestana('bitacora');
   }, []);
 
   const salir = () => {
     auth.logout();
     setReporte(null);
+    setCasoActivo(null);
     setSesion({ estado: 'sin_sesion' });
     cognito?.salir();
   };
@@ -155,6 +167,7 @@ function AppBase({ cognito }: { cognito: AccionesCognito | null }) {
             usuario={sesion.usuario}
             reporteActivo={reporte}
             onOpenReporte={abrirReporte}
+            onVerBitacora={verBitacora}
             onLogout={sesion.usuario ? salir : undefined}
           />
         }
@@ -167,13 +180,19 @@ function AppBase({ cognito }: { cognito: AccionesCognito | null }) {
               <button role="tab" aria-selected={pestana === 'senales'} className={pestana === 'senales' ? 'active' : ''} onClick={() => setPestana('senales')}>
                 Señales y decisión
               </button>
+              <button role="tab" aria-selected={pestana === 'bitacora'} className={pestana === 'bitacora' ? 'active' : ''} onClick={() => setPestana('bitacora')}>
+                Bitácora
+              </button>
             </nav>
             {/* El visor se mantiene montado para no recargar el PDF al cambiar de pestaña. */}
             <div className="pestana" hidden={pestana !== 'reporte'}>
               <PdfWorkspace reporte={reporte} />
             </div>
             <div className="pestana" hidden={pestana !== 'senales'}>
-              <SenalesPanel casoId={reporte?.casoId ?? null} />
+              <SenalesPanel casoId={casoActivo} />
+            </div>
+            <div className="pestana" hidden={pestana !== 'bitacora'}>
+              <BitacoraPanel casoId={casoActivo} visible={pestana === 'bitacora'} />
             </div>
           </div>
         }

@@ -11,6 +11,10 @@ Aplicación web en **React + TypeScript (Vite)** que habla con el backend **Flas
 - **Derecha — Señales y decisión:** revisión humana. Cada señal se marca como relevante,
   descartada (con comentario obligatorio) o pendiente, y el caso se cierra cuando todas están
   decididas. Todo queda en la bitácora con el usuario.
+- **Derecha — Bitácora:** el rastro del caso en orden (solicitud, SQL, llamadas al modelo con
+  equipo y latencia, calidad, reglas, normas, reporte, decisiones y errores). Es de solo lectura,
+  se actualiza sola mientras el caso corre y se descarga en JSON. Se abre también desde
+  «Ver bitácora» en cualquier mensaje del chat, incluso si el caso quedó bloqueado.
 
 ## Arranque
 
@@ -43,13 +47,13 @@ Todos documentados en [docs/api.md](../docs/api.md):
 | Uso | Endpoint |
 |---|---|
 | Sesión | `GET /health`, `POST /auth/login`, `GET /auth/yo` |
-| Preguntar | `POST /demo/preguntar` |
-| Analizar | `POST /demo/casos/<id>/analizar` |
+| Preguntar | `POST /casos`, `POST /casos/<id>/orquestar` (orquestador LangGraph) |
+| Seguir el avance | `GET /casos/<id>`, `GET /casos/<id>/bitacora`, `GET /casos/<id>/resultados`, `GET /casos/<id>/reportes` |
+| Bitácora | `GET /casos/<id>/bitacora` |
 | Ver el PDF | `GET /casos/<id>/reportes/<v>/contenido` (bytes verificados con SHA-256) |
 | Señales y cierre | `GET /casos/<id>`, `GET /casos/<id>/senales`, `POST /casos/<id>/senales/<sid>/decision`, `POST /casos/<id>/transiciones` |
 
-`/demo/*` existe mientras no está el orquestador (LangGraph). Cuando exista, solo cambia
-`src/api/auditor.ts`.
+`/demo/*` sigue en el backend como camino de respaldo, pero el front ya usa el orquestador.
 
 ## Estructura
 

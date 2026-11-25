@@ -17,7 +17,23 @@ async function arrancar() {
   try {
     cognito = (await auth.salud()).cognito ?? null;
   } catch {
-    /* backend caído: App muestra el error y permite reintentar */
+    // Sin /health no se sabe si hay Cognito: mostrar el login local aquí confundiría.
+    // Recargar vuelve a leer la configuración cuando el backend (o el túnel) regrese.
+    root.render(
+      <div className="login">
+        <div className="login-card">
+          <h1>Auditor de contrataciones</h1>
+          <p className="login-error">
+            No hay conexión con el backend. Revisa que el túnel SSH siga abierto (o que BACKEND_URL apunte al puerto
+            correcto) y que el backend esté encendido.
+          </p>
+          <button className="btn primary" onClick={() => window.location.reload()}>
+            Reintentar
+          </button>
+        </div>
+      </div>,
+    );
+    return;
   }
   root.render(
     <StrictMode>

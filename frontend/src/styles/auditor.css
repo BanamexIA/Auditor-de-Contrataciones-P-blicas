@@ -477,3 +477,100 @@ details.sql pre {
     opacity: 0.3;
   }
 }
+
+/* ---------- bitácora ---------- */
+.caso-id .link {
+  font-size: inherit;
+}
+
+.bitacora-lista {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 14px;
+  border-left: 2px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.evento {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+}
+
+.evento::before {
+  content: '';
+  position: absolute;
+  left: -21px;
+  top: 14px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--border-strong);
+  border: 2px solid var(--surface);
+}
+
+.evento.ev-transicion::before,
+.evento.ev-reporte_guardado::before {
+  background: var(--accent);
+}
+
+.evento.ev-decision::before {
+  background: var(--ok);
+}
+
+.evento.ev-error::before,
+.evento.ev-sql_rechazado::before {
+  background: var(--danger);
+}
+
+.evento.ev-error,
+.evento.ev-sql_rechazado {
+  border-left: 3px solid var(--danger);
+}
+
+.evento header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.evento header .chips {
+  align-items: baseline;
+}
+
+.evento time {
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.evento .criterio {
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+
+.bitacora-sql,
+.bitacora-detalle pre {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--surface-3);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.bitacora-detalle {
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.bitacora-detalle summary {
+  cursor: pointer;
+  color: var(--text-muted);
+}
