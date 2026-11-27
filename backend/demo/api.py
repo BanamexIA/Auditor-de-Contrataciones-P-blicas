@@ -14,6 +14,7 @@ import os
 from datetime import date, datetime
 from decimal import Decimal
 
+from backend.usuarios.auth import puede_ver_sql
 from flask import Blueprint, Flask, current_app, jsonify, request
 
 from backend.agentes.servicio import AgenteNoDisponible, seleccionar_agente
@@ -78,7 +79,7 @@ def preguntar():
     sql = next((e["detalle"] for e in reversed(repo.listar_eventos(caso["id"]))
                 if e["evento"] == "sql_generado"), {})
     return jsonify(
-        **base, tipo="sql", sql=sql.get("sql"), supuestos=sql.get("supuestos", []),
+        **base, tipo="sql", sql=sql.get("sql") if puede_ver_sql() else None, supuestos=sql.get("supuestos", []),
         equipo=agente["nombre_tailnet"], modelo=cliente.model, total_filas=len(filas),
         filas=[{k: _json(v) for k, v in f.items()} for f in filas[:MAX_FILAS]],
     )

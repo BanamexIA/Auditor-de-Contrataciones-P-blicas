@@ -42,12 +42,27 @@ CATEGORY_VALUES = {
     ),
     "fecha_inicio_estado": ("valida", "nula", "fuera_de_rango", "no_parseable"),
     "nivel_confianza": ("alta", "media"),
+    # Cambian por fuente: ComprasMX en mayúsculas, el histórico con mayúscula inicial (datos del 2026-11-25).
+    # El 2026-11-25 «adjudicaciones directas de obra pública de ComprasMX 2026» dio 0 filas por el valor.
+    "tipo_contratacion": (
+        "ADQUISICIONES", "SERVICIOS", "OBRA PÚBLICA", "SERVICIOS RELACIONADOS CON LA OBRA", "ARRENDAMIENTOS",
+        "Adquisiciones", "Servicios", "Obra Pública", "Servicios Relacionados con la OP", "Arrendamientos",
+        "No especificado por la UC", "Sin dato",
+    ),
+    "ley": ("LAASSP", "LOPSRM", "CEEP", "CREDEX", "LAPP"),
 }
 _NAME_HINT = (
     " Si es el nombre de un proveedor, búscalo en proveedor_normalizado; si es una institución, "
     "en institucion."
 )
-CATEGORY_HINTS = {"fuente": _NAME_HINT, "tipo_procedimiento_norm": _NAME_HINT}
+CATEGORY_HINTS = {
+    "fuente": _NAME_HINT,
+    "tipo_procedimiento_norm": _NAME_HINT,
+    "tipo_contratacion": (
+        " En ComprasMX van en mayúsculas ('OBRA PÚBLICA') y en el histórico con mayúscula inicial ('Obra Pública'):"
+        " para cualquier fuente usa UPPER(tipo_contratacion) = 'OBRA PÚBLICA'."
+    ),
+}
 # COUNT(*) over the views counts contracts. A column alias that names another unit
 # says the model meant that unit (A5, mejora 21: on 2026-11-23, n02 of casos_nuevos
 # labeled 2,356,609 contracts as "expedientes"; there are 1,768,189).

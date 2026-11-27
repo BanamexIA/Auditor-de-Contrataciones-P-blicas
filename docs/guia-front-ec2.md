@@ -46,6 +46,40 @@ certificado válido para la EC2 dentro del tailnet:
 `tailscale serve` reenvía a `127.0.0.1:5000`, donde el contenedor ya escucha; no se abre ningún puerto
 en el grupo de seguridad de AWS. Para quitarlo: `sudo tailscale serve --https=443 off`.
 
+## 3b. URL pública para la demo: Tailscale Funnel
+
+`serve` (paso 3) solo se ve dentro del tailnet. Para que el jurado entre desde cualquier navegador, sin
+Tailscale, se usa **Funnel**: la misma URL `https://auditor-ec2.<tu-tailnet>.ts.net`, pero pública.
+
+1. **Consola de Tailscale → DNS:** *MagicDNS* y *HTTPS Certificates* activados (igual que en el paso 3).
+2. **Consola de Tailscale → Access controls:** permite Funnel al nodo de la EC2 (`tag:db`) agregando
+   esto al archivo de políticas y guarda:
+   ```json
+   "nodeAttrs": [
+     { "target": ["tag:db"], "attr": ["funnel"] }
+   ]
+   ```
+   (Si ya existe `nodeAttrs`, agrega solo el objeto a la lista.)
+3. **En la EC2:**
+   ```bash
+   sudo tailscale serve --https=443 off 2>/dev/null   # si antes se usó serve en el mismo puerto
+   sudo tailscale funnel --bg 5000
+   tailscale funnel status
+   curl -s https://auditor-ec2.<tu-tailnet>.ts.net/api/health   # desde cualquier máquina
+   ```
+   La primera vez el certificado tarda unos segundos en emitirse.
+4. **Cognito** (cuenta de Aarón) → *App client* → *Login pages*: agrega
+   `https://auditor-ec2.<tu-tailnet>.ts.net/` en *Allowed callback URLs* y *Allowed sign-out URLs*.
+5. Prueba desde un teléfono **con los datos móviles** (fuera de Tailscale): debe abrir el login.
+
+**Seguridad.** La página de login queda pública; la API sigue pidiendo sesión (Cognito o usuario local) y
+solo entran correos dados de alta (paso 4). Aun así, enciéndelo para la demo y apágalo después:
+```bash
+sudo tailscale funnel --https=443 off
+```
+Funnel no depende de la IP de la EC2: la URL no cambia aunque el lab de AWS se reinicie, pero el lab
+(cuenta de Aarón: EC2, S3 y Cognito) debe estar iniciado.
+
 ## 4. Dar de alta a cada integrante
 
 Cognito solo dice quién es la persona; el rol lo da el backend. Cada correo debe existir en

@@ -61,6 +61,29 @@ def usuario_actual() -> str | None:
     return datos["usuario"] if datos else None
 
 
+# Roles que pueden ver el SQL de un caso. Retroalimentación del 2026-11-26: mostrarlo al usuario de negocio
+# expone tablas, vistas y columnas (información útil para un atacante, aunque el acceso sea de solo lectura).
+# El SQL se sigue guardando completo en la bitácora; la API solo lo devuelve a estos roles.
+ROLES_VEN_SQL = frozenset({"admin"})
+EVENTOS_CON_SQL = frozenset({"sql_generado", "sql_rechazado", "sql_ejecutado"})
+
+
+def puede_ver_sql() -> bool:
+    """True para el rol admin, o si la autenticación está desactivada (desarrollo y pruebas)."""
+    if _config() is None:
+        return True
+    datos = g.get("usuario")
+    return bool(datos) and datos.get("rol") in ROLES_VEN_SQL
+
+
+def ocultar_sql_evento(evento: dict) -> dict:
+    """Copia del evento sin el texto del SQL si el usuario no puede verlo (el resto del detalle se conserva)."""
+    if evento.get("evento") not in EVENTOS_CON_SQL or puede_ver_sql():
+        return evento
+    detalle = {k: v for k, v in (evento.get("detalle") or {}).items() if k != "sql"}
+    return {**evento, "detalle": {**detalle, "sql_oculto": True}}
+
+
 def requiere_rol(*roles: str) -> Callable:
     def decorar(vista: Callable) -> Callable:
         @wraps(vista)

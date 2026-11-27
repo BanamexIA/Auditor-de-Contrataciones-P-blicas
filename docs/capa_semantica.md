@@ -331,3 +331,20 @@ usa `ILIKE`, que ignora mayúsculas pero no acentos.
 | 6 | ¿Se permiten CTE, `UNION`, `RANK()`, `DENSE_RANK()`, `unaccent()` y `v_cobertura_fuentes`? | Mantener el validador estricto | Agente Consulta y backend |
 | 7 | ~~Rango real de `fecha_inicio` en ComprasMX~~ | Resuelta el 2026-11-12: todos sus inicios caen en 2026 (M9) | Agente Consulta |
 | 8 | Los casos q08 y q19 del golden set combinan `rfc_exacto` con `requiere_revision_humana`, que nunca coinciden | Corregirlos antes de medir la exactitud (A4) | Agente Consulta |
+
+## Tipo de contratación (2026-11-25)
+
+`tipo_contratacion` se escribe distinto en cada fuente:
+
+| ComprasMX | Histórico |
+|---|---|
+| `ADQUISICIONES` | `Adquisiciones` |
+| `SERVICIOS` | `Servicios` |
+| `ARRENDAMIENTOS` | `Arrendamientos` |
+| `OBRA PÚBLICA` (4,776) | `Obra Pública` (211,954) |
+| `SERVICIOS RELACIONADOS CON LA OBRA` | `Servicios Relacionados con la OP` |
+| — | `No especificado por la UC`, `Sin dato` |
+
+Para obra pública en cualquier fuente: `UPPER(tipo_contratacion) = 'OBRA PÚBLICA'`. El validador del Agente
+Consulta rechaza un valor que no está en la lista (p. ej. `'OBRA PUBLICA'` sin acento, que da 0 filas) y le
+dice al modelo cuáles son los válidos.

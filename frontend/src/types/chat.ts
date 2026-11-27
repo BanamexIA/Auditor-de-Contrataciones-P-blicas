@@ -5,7 +5,8 @@ export type ChatRole = 'user' | 'assistant';
 /** Resultado del Agente Consulta asociado a una respuesta. */
 export interface ResultadoConsulta {
   casoId: string;
-  sql: string;
+  /** Solo llega para el rol admin; para los demás es null. */
+  sql: string | null;
   supuestos: string[];
   totalFilas: number;
   filas: Fila[];

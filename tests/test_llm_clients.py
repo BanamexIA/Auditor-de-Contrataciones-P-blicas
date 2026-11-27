@@ -65,6 +65,7 @@ class OllamaClientTests(unittest.TestCase):
         ])
         self.assertEqual(payload["options"]["temperature"], 0.2)
         self.assertEqual(payload["options"]["num_ctx"], client.num_ctx)
+        self.assertEqual(payload["keep_alive"], "60m")  # el modelo no se descarga entre casos (2026-11-26)
         self.assertIsInstance(result, LLMResponse)
         self.assertEqual((result.text, result.input_tokens, result.output_tokens),
                          ("respuesta local", 12, 4))

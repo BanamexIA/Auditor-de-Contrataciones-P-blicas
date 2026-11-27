@@ -63,7 +63,7 @@ export const auditor = {
 
   /** Filas de la consulta del caso (el backend re-ejecuta su SQL en solo lectura). */
   resultados(casoId: string) {
-    return apiJson<{ sql: string; supuestos: string[]; total_filas: number; filas: Fila[] }>(
+    return apiJson<{ sql: string | null; supuestos: string[]; total_filas: number; filas: Fila[] }>(
       `/casos/${enc(casoId)}/resultados`,
     );
   },

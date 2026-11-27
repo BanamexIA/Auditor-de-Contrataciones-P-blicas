@@ -5,6 +5,7 @@ En la EC2:
     docker compose exec backend python -m backend.agentes listar
     docker compose exec backend python -m backend.agentes verificar
     docker compose exec backend python -m backend.agentes baja --nombre laptop-alean
+    docker compose exec backend python -m backend.agentes calentar      # antes de una demo
 """
 
 from __future__ import annotations
@@ -46,6 +47,8 @@ def main(
     p_listar.add_argument("--todos", action="store_true", help="Incluir dados de baja")
     p_ver = sub.add_parser("verificar", help="Verificar ahora")
     p_ver.add_argument("--nombre", help="Solo este agente")
+    p_cal = sub.add_parser("calentar", help="Cargar los modelos en la GPU de cada laptop disponible")
+    p_cal.add_argument("--nombre", help="Solo este agente")
     args = parser.parse_args(argv)
 
     if repo is None:
@@ -73,6 +76,21 @@ def main(
                 resultados = verificar_todos(repo, http)
             for a in resultados:
                 print(_linea(a) + (f"  error={a['ultimo_error']}" if a["ultimo_error"] else ""))
+        elif args.comando == "calentar":
+            from backend.agentes.calentar import calentar, resumen
+            from backend.agentes.verificacion import modelo_requerido, url_de
+            agentes = [a for a in verificar_todos(repo, http)
+                       if not args.nombre or a["nombre_tailnet"] == args.nombre.lower()]
+            if not agentes:
+                raise AgenteNoEncontrado(args.nombre or "(ninguno activo)")
+            for a in agentes:
+                if a["estado"] != "disponible":
+                    print(f"{a['nombre_tailnet']}: se omite ({a['estado']})")
+                    continue
+                try:
+                    print(resumen(a["nombre_tailnet"], calentar(url_de(a["nombre_tailnet"]), modelo_requerido(a))))
+                except Exception as exc:  # una laptop que falla no detiene a las demás
+                    print(f"{a['nombre_tailnet']}: no se pudo calentar ({type(exc).__name__}: {exc})")
     except (NombreInvalido, AgenteDuplicado, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2

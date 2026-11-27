@@ -99,7 +99,9 @@ class OllamaEmbeddingClient:
     def embed(self, texts: Sequence[str]) -> tuple[list[list[float]], float]:
         if not texts:
             raise ValueError("At least one text is required to generate embeddings.")
-        request_body = json.dumps({"model": self.model, "input": list(texts)}).encode("utf-8")
+        # keep_alive: igual que el LLM (llm/ollama_client.py), para no recargar el modelo en cada caso.
+        request_body = json.dumps({"model": self.model, "input": list(texts),
+                                   "keep_alive": setting("OLLAMA_KEEP_ALIVE", "60m")}).encode("utf-8")
         request = urllib.request.Request(
             f"{self.base_url}/api/embed",
             data=request_body,

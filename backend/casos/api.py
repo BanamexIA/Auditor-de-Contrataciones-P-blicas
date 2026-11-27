@@ -10,6 +10,7 @@ from typing import Any
 from flask import Blueprint, Response, current_app, jsonify, redirect, request
 from sqlalchemy.exc import OperationalError
 
+from backend.usuarios.auth import ocultar_sql_evento
 from backend.casos.decisiones import CasoCerrado, DecisionInvalida, SenalNoEncontrada
 from backend.casos.estados import ESTADOS, TransicionInvalida
 from backend.casos.repositorio import CasoNoEncontrado, RepositorioCasos, ReporteNoEncontrado
@@ -98,7 +99,7 @@ def bitacora_caso(caso_id: str):
         eventos = _repo().listar_eventos(caso_id)
     except CasoNoEncontrado:
         return _error(404, "caso_no_encontrado", f"No existe el caso {caso_id}.")
-    return jsonify(eventos=[_caso_json(ev) for ev in eventos])
+    return jsonify(eventos=[_caso_json(ocultar_sql_evento(ev)) for ev in eventos])
 
 
 def _senal_json(senal: dict[str, Any]) -> dict[str, Any]:
