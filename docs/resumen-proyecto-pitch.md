@@ -113,7 +113,7 @@ Después, **el auditor decide** cada señal (relevante, descartada o pendiente) 
 - **Umbrales:** los de detección son provisionales y falta validarlos con expertos del socio formador.
 - **Fuentes:** no registran pagos, sanciones ni modificaciones de contratos. El sistema lo declara.
 - **Corpus:** falta el reglamento de la LAASSP de 2010. El texto de la LOPSRM es el consolidado vigente.
-- **Listas grandes:** se cortan en 200 filas, y el sistema avisa cuántas había en total (p. ej. 200 de 58,868).
+- **Listas grandes:** cada caso analiza hasta 200 contratos y avisa el total (p. ej. 200 de 58,868). Para universos grandes, la pregunta se acota por institución, proveedor o periodo.
 - **Infraestructura:** es académica (AWS Academy). En producción, el equipo de TI del banco operaría los motores de inferencia y la URL.
 - **Siguiente paso:** más reglas (fraccionamiento, concentración por dependencia), un modelo secuencial (LSTM) para patrones en el tiempo y un tablero de casos.
 
@@ -137,3 +137,56 @@ Después, **el auditor decide** cada señal (relevante, descartada o pendiente) 
 | Pruebas automatizadas | 610 |
 | Tiempo típico de un caso | ~25–60 s con el modelo en una laptop (caso de prueba: 24 s de la pregunta al reporte) |
 | Verificación de citas en el reporte de prueba | 3/3 (100%) |
+
+## 11. Rendimiento y GPUs (medido el 26 de noviembre en la bitácora)
+
+| | GPU (laptop MSI) | CPU (laptop sin GPU) |
+|---|---|---|
+| Tiempo por caso (pregunta → listo para revisión) | **43 s** | 292 s (6.8× más lento) |
+| Tiempo del modelo dentro del caso | 23.9 s | 170 s |
+| Tokens por llamada | ~4,600 de entrada · ~235 de salida | |
+| VRAM que ocupan los modelos | **~5.1 GB** (qwen2.5:7b 4.8 GB + embeddings 0.3 GB), 100% en GPU | — |
+| Carga en frío (primera consulta) | ~18 s; se evita con `keep_alive` y el comando `calentar` | |
+
+- **Una GPU de 8 GB basta para un motor.** Procesa unos **85 a 150 casos por hora**: 1.4 casos/min uno tras otro y hasta ~2.5 si se encadenan. El modelo es solo el 56% del caso; el resto corre en el servidor.
+- **Regla para dimensionar:** *GPUs ≈ auditores activos ÷ 7–12*, suponiendo que cada auditor lanza un caso cada ~5 min (el tiempo de revisar un reporte). **20 auditores → 2–3 GPUs.** Si se quiere que nadie espere en la hora pico: **una GPU por caso simultáneo**.
+- **Muestra pequeña:** 9 casos con GPU y 7 con CPU. El supuesto de 5 min por caso es una estimación, no una medición.
+
+## 12. Costos (USD, precios de lista de noviembre de 2026; verificar con la calculadora de AWS)
+
+| Componente | Referencia | Costo |
+|---|---|---|
+| Servidor (backend, base, agentes) | EC2 t3.large, 2 vCPU / 8 GiB, ~$0.083/h | **~$61/mes** |
+| Disco | EBS gp3, 30 GB | ~$3/mes |
+| Reportes PDF | S3 Standard, $0.023/GB-mes; 10,000 reportes ≈ 1 GB | **< $1/mes** |
+| Inicio de sesión | Cognito Essentials, gratis hasta 10,000 usuarios activos al mes | **$0** para un área de auditoría |
+| Motor de inferencia propio | GPU de 8 GB (RTX 4060 o similar): ~$300–$490 una vez | Sin costo por consulta |
+| Motor en la nube (alternativa) | g4dn.xlarge (GPU T4 de 16 GB), ~$0.53/h | ~$93/mes en horario laboral (8 h × 22 días); ~$384/mes 24/7 |
+| API comercial (comparación) | GPT-4o-mini, $0.15 / $0.60 por millón de tokens | **~$0.001 por caso** |
+
+**Escenario: 20 auditores, ~40,000 casos al mes**
+
+| Opción | Costo mensual aproximado | Datos fuera del banco |
+|---|---|---|
+| GPUs propias (3 × 8 GB, ~$1,200 una vez) | ~$65 de servidor | **No** |
+| GPUs en la nube (3 × g4dn.xlarge en horario laboral) | ~$345 | No (quedan en la cuenta del banco) |
+| API comercial | ~$105 ($65 de servidor + ~$40 de tokens) | **Sí**: cada pregunta y sus datos van al proveedor |
+
+**Lectura honesta:**
+- Por costo de inferencia, una API barata gana.
+- Lo que justifica el modelo local es que **ningún dato sale del banco**, el **costo es fijo y predecible**, no hay **dependencia de un proveedor ni límites de uso**, y es **auditable**: modelo y versión exactos en la bitácora.
+- La arquitectura no se casa con una opción: el cliente de LLM es intercambiable (`llm/`), así que si el banco aprueba un proveedor en la nube, se cambia el motor sin tocar los agentes.
+
+## 13. Ventajas y desventajas
+
+| Ventajas | Desventajas / riesgos |
+|---|---|
+| Expediente auditable de punta a punta (bitácora que solo crece, SHA-256, decisiones con usuario) | Depende de GPUs: en CPU un caso tarda ~5 min |
+| Datos y modelos dentro del entorno del banco | Modelo de 7B: se equivoca (p. ej. un cruce con el 69-B no pedido); lo mitiga el validador, a costa de un reintento |
+| No inventa: bloquea con motivo, declara "sin norma" o "sin datos" | Cada caso analiza hasta 200 contratos; los universos grandes requieren preguntas acotadas |
+| Normas vigentes a la fecha del contrato y de la ley correcta, con citas verificadas | Umbrales de detección provisionales, por validar con expertos |
+| SQL de solo lectura; el texto del SQL solo lo ve el rol administrador | Corpus legal incompleto (falta el reglamento de la LAASSP de 2010) |
+| Costo fijo y bajo; escala agregando GPUs | Hoy corre en infraestructura académica (AWS Academy, laptops); en producción requiere operación de TI |
+| Motores intercambiables: si una GPU falla, otra toma el caso | Las fuentes no tienen pagos, sanciones ni modificaciones de contratos |
+
+**Fuentes de precios:** [AWS EC2 On-Demand](https://aws.amazon.com/ec2/pricing/on-demand/) · [t3.large](https://www.doit.com/compute/spot/us-east-1/t3.large) · [g4dn.xlarge](https://www.doit.com/compute/spot/us-east-1/g4dn.xlarge) · [S3](https://aws.amazon.com/s3/pricing/) · [Cognito](https://aws.amazon.com/cognito/pricing/) · [GPT-4o-mini](https://developers.openai.com/api/docs/pricing) · [RTX 4060](https://gpuprix.com/us/gpus/geforce-rtx-4060)
