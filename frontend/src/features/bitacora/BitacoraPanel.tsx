@@ -231,6 +231,9 @@ export function BitacoraPanel({ casoId, visible }: { casoId: string | null; visi
                 </header>
                 {resumen(ev) && <p className="criterio">{resumen(ev)}</p>}
                 {sql && <pre className="bitacora-sql">{sql}</pre>}
+                {ev.detalle?.sql_oculto === true && (
+                  <p className="aviso">El texto del SQL solo es visible para el rol de administrador.</p>
+                )}
                 <details className="bitacora-detalle">
                   <summary>Detalle</summary>
                   <pre>{JSON.stringify(ev.detalle, null, 2)}</pre>

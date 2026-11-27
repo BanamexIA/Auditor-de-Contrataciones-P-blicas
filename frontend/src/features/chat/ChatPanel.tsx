@@ -141,14 +141,23 @@ export function ChatPanel({ usuario, reporteActivo, onOpenReporte, onVerBitacora
 
               {m.consulta && m.consulta.filas.length > 0 && <ResultTable filas={m.consulta.filas} total={m.consulta.totalFilas} />}
 
-              {m.consulta && (
+              {/* Sin SQL en el chat (retroalimentación del 2026-11-26): expone tablas y columnas. Queda en la
+                  bitácora, visible solo para el rol admin. Aquí: supuestos y quién respondió. */}
+              {m.consulta && m.consulta.supuestos.length > 0 && (
                 <details className="sql">
-                  <summary>
-                    SQL generado{m.consulta.modelo ? ` · ${m.consulta.modelo}` : ''}
-                    {m.consulta.equipo ? ` en ${m.consulta.equipo}` : ''}
-                  </summary>
-                  <pre>{m.consulta.sql}</pre>
+                  <summary>Supuestos de la consulta</summary>
+                  <ul className="supuestos">
+                    {m.consulta.supuestos.map((s) => (
+                      <li key={s}>{s}</li>
+                    ))}
+                  </ul>
                 </details>
+              )}
+              {m.consulta?.modelo && (
+                <small className="caso-id">
+                  Respondió {m.consulta.modelo}
+                  {m.consulta.equipo ? ` en ${m.consulta.equipo}` : ''}
+                </small>
               )}
 
               {m.reporte && (

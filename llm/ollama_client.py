@@ -19,6 +19,16 @@ def num_ctx_setting() -> int:
     return value if value > 0 else DEFAULT_NUM_CTX
 
 
+# Ollama descarga el modelo de la GPU tras 5 min sin uso (su valor por defecto) y la siguiente pregunta paga
+# la carga de ~4.7 GB: en la sesión del 2026-11-26 la primera consulta tardó demasiado por eso. Se pide que
+# lo mantenga cargado; OLLAMA_KEEP_ALIVE lo cambia ("60m", "2h", "-1" = siempre).
+DEFAULT_KEEP_ALIVE = "60m"
+
+
+def keep_alive_setting() -> str:
+    return setting("OLLAMA_KEEP_ALIVE", "") or DEFAULT_KEEP_ALIVE
+
+
 class OllamaClient(LLMClient):
     provider = "ollama"
 
@@ -66,6 +76,7 @@ class OllamaClient(LLMClient):
                     {"role": "user", "content": prompt},
                 ],
                 "stream": False,
+                "keep_alive": keep_alive_setting(),
                 "options": {"temperature": temperature, "num_ctx": self.num_ctx},
             },
         )

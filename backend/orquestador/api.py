@@ -123,5 +123,6 @@ def resultados(caso_id: str):
         return _error(503, "resultados_no_disponibles",
                       "No se pudo volver a ejecutar la consulta del caso. Intenta más tarde.")
     filas = json.loads(json.dumps(filas, default=_a_json))
-    return jsonify(caso_id=caso_id, sql=ejecutado["sql"], supuestos=supuestos,
+    from backend.usuarios.auth import puede_ver_sql
+    return jsonify(caso_id=caso_id, sql=ejecutado["sql"] if puede_ver_sql() else None, supuestos=supuestos,
                    total_filas=len(filas), filas=filas[:MAX_FILAS_RESULTADOS])
